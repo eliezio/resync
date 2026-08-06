@@ -245,18 +245,25 @@ affects written values only, never matching.
 Implemented in [`resync_engine/`](./resync_engine):
 
 - `model.py` — load catalog (`config.skeleton.json`) and config (`resync.yaml`).
-- `graph.py` — Kahn topological sort, `CycleError` on any cycle.
+- `graph.py` — Kahn topological sort; breaks nullable cycles/self-refs (deferred), `CycleError`
+  on non-nullable ones.
 - `plan.py` — classify surrogate vs natural identity; propagate **surrogate lineage** so a
   surrogate value is remapped through its *origin* table's id-map wherever it reappears.
 - `sqlgen.py` — generate set-based SQL: single `MERGE` for natural/value tables; a 5-step
   id-map sequence (create / match / allocate / insert / update) for surrogate tables.
-- `runner.py` — dry-run counts, then apply all DML in one transaction; drop id-maps after.
-- `cli.py` — `print-sql` (offline preview) and `run [--apply]`.
+- `runner.py` — dry-run counts, then apply all DML in one transaction; FK constraint
+  disable/re-enable-with-validate; drop id-maps after.
+- `seed.py` — `seed-config`: draft a `resync.yaml` from the catalog with review markers.
+- `cli.py` — `print-sql` (offline preview), `run [--apply]`, and `seed-config`.
+
+**Setup:** Python ≥ 3.10; runtime deps `oracledb` and `PyYAML` (declared in `pyproject.toml`).
+Install with `pip install -e '.[dev]'` (or `mise run install`); the CLI is then the `resync`
+command.
 
 ```
-python -m resync_engine.cli print-sql            # runs the public sample by default
-python -m resync_engine.cli run --catalog config.skeleton.json --config resync.yaml --dsn … --user … --password …
-python -m resync_engine.cli run --catalog … --config … --dsn host:1521/svc --user MAS --password *** [--apply]
+resync print-sql                                 # runs the public sample by default
+resync run --catalog config.skeleton.json --config resync.yaml --dsn host:1521/svc --user … --password *** [--apply]
+resync seed-config --catalog config.skeleton.json > resync.yaml   # draft a config to review
 ```
 
 The engine refuses to run while any table is BLOCKED (an identity column that is a surrogate FK
