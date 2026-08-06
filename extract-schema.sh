@@ -53,6 +53,7 @@ schemacrawler.format.hide_foreignkey_names=true
 schemacrawler.format.hide_primarykey_names=true
 schemacrawler.format.hide_index_names=true
 schemacrawler.format.hide_constraint_names=true
+schemacrawler.format.show_unqualified_names=true
 schemacrawler.format.show_ordinal_numbers=false
 schemacrawler.graph.show_foreignkey_cardinality=false
 schemacrawler.graph.show_primarykey_cardinality=false
