@@ -37,6 +37,13 @@ def main(argv: list[str] | None = None) -> None:
     rn.add_argument("--allow-unsequenced", action="store_true",
                     help="permit surrogate tables without a sequence (dev only; unsafe)")
 
+    sc = sub.add_parser("seed-config", parents=[common],
+                        help="draft a resync.yaml from the catalog (review the TODO/CONFIRM marks)")
+    sc.add_argument("--staging", default="RESYNC_STG")
+    sc.add_argument("--target", default="TARGET")
+    sc.add_argument("--merge", action="store_true",
+                    help="keep tables already present in --config; seed only the missing ones")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "print-sql":
@@ -45,6 +52,10 @@ def main(argv: list[str] | None = None) -> None:
         runner.run(args.catalog, args.config, dsn=args.dsn, user=args.user,
                    password=args.password, apply=args.apply,
                    allow_unsequenced=args.allow_unsequenced)
+    elif args.cmd == "seed-config":
+        from . import seed
+        existing = args.config if args.merge else None
+        print(seed.seed_config(args.catalog, existing, args.staging, args.target))
 
 
 if __name__ == "__main__":
