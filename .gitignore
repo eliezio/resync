@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Proprietary instance files — NEVER commit (root-anchored so examples/ stays public)
+/catalog.json
+/config.skeleton.json
+/resync.yaml
+/INSTANCE.md
+/.denylist
+
+# Data Pump dumps and generated SQL
+*.dmp
+*.sql

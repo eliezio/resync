@@ -1,0 +1,42 @@
+# Sample identity config for the synthetic Order/OrderLine schema (examples/sample_catalog.json).
+# Public, proprietary-free. Demonstrates every matching mode and the owned-child delete-orphan.
+
+audit_exclude: [UPDATE_ID, UPDATE_TMSTMP, VERSION_ID]
+staging_schema: RESYNC_STG
+target_schema: SALES
+
+tables:
+
+  # Reference tables — code is the primary key.
+  CURRENCY:     { mode: natural, identity: [CURRENCY_CD] }
+  ORDER_STATUS: { mode: natural, identity: [STATUS_CD] }
+
+  # Surrogate-keyed entities — natural key distinct from the surrogate; VERSION_ID excluded.
+  CUSTOMER:
+    mode: natural
+    identity: [CUSTOMER_CD]
+    sequence: CUSTOMER_SEQ
+  PRODUCT:
+    mode: natural
+    identity: [SKU]
+    sequence: PRODUCT_SEQ
+
+  # Aggregate root — surrogate ORDER_ID, natural key ORDER_NO, VERSION_ID bumped in place.
+  SALES_ORDER:
+    mode: natural
+    identity: [ORDER_NO]
+    sequence: ORDER_SEQ
+
+  # Owned children — follow their root; mirror within a matched parent (delete orphans).
+  ORDER_LINE:
+    mode: value                       # PRODUCT_ID remaps via PRODUCT; ORDER_ID via SALES_ORDER
+    identity: [ORDER_ID, LINE_NO]
+    delete_orphans: true              # owned by SALES_ORDER (scope keys on ORDER_ID)
+  ORDER_LABEL:
+    mode: value
+    identity: [ORDER_ID, LABEL_CD]
+    delete_orphans: true
+  ORDER_LINE_ALLOC:
+    mode: value                       # ORDER_ID remaps via SALES_ORDER through ORDER_LINE (lineage)
+    identity: [ORDER_ID, LINE_NO, ALLOC_SEQ]
+    delete_orphans: true              # owned by ORDER_LINE

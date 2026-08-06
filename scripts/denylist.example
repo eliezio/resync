@@ -1,0 +1,13 @@
+# Denylist template for the leak guard (scripts/check-no-proprietary.sh).
+#
+# Copy this file to ./.denylist (which is gitignored) and fill it with the naming stems of your
+# real schema. One case-insensitive regex per line; blank lines and # comments are ignored.
+# Keep the stems specific enough to avoid false positives on generic English words.
+#
+# Do NOT put your real stems in this example file — it is public. Put them only in ./.denylist.
+#
+# Example (generic placeholders — replace with your own):
+# ACME_
+# WIDGET_
+# _INTERNALCODE
+# SECRET_PROJECT
