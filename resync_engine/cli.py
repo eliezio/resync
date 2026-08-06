@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> None:
     rn.add_argument("--user", required=True)
     rn.add_argument("--password", required=True)
     rn.add_argument("--apply", action="store_true", help="apply changes (default: dry-run)")
+    rn.add_argument("--allow-unsequenced", action="store_true",
+                    help="permit surrogate tables without a sequence (dev only; unsafe)")
 
     args = ap.parse_args(argv)
 
@@ -41,7 +43,8 @@ def main(argv: list[str] | None = None) -> None:
         print(runner.print_sql(args.catalog, args.config))
     elif args.cmd == "run":
         runner.run(args.catalog, args.config, dsn=args.dsn, user=args.user,
-                   password=args.password, apply=args.apply)
+                   password=args.password, apply=args.apply,
+                   allow_unsequenced=args.allow_unsequenced)
 
 
 if __name__ == "__main__":

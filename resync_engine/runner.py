@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from . import sqlgen
 from .model import Config, Schema
-from .plan import TablePlan, build_plans, fk_constraints
+from .plan import TablePlan, build_plans, fk_constraints, unsequenced_surrogates
 
 
 @dataclass
@@ -50,7 +50,7 @@ def _fetch_counts(cur, p: TablePlan, cfg: Config) -> Counts:
 
 
 def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
-        apply: bool = False) -> None:
+        apply: bool = False, allow_unsequenced: bool = False) -> None:
     import oracledb  # lazy: not needed for print_sql
 
     schema, order, plans, cfg = plan_all(catalog_path, config_path)
@@ -71,6 +71,14 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
         if not apply:
             print("\ndry-run only; no changes made.")
             return
+
+        unseq = unsequenced_surrogates(order, plans)
+        if unseq and not allow_unsequenced:
+            raise SystemExit(
+                "refusing to apply: surrogate tables without a configured sequence "
+                f"{unseq}. Set `sequence:` for each (they allocate keys via NEXTVAL, which keeps "
+                "the sequence ahead of the data so application inserts never collide). Re-run with "
+                "allow_unsequenced=True only for a throwaway/dev target.")
 
         tgt = cfg.target_schema
         ch = cfg.constraint_handling

@@ -173,8 +173,12 @@ constraint.
    a separate statement.
 5. `reload` tables skip matching: `TRUNCATE` then insert all staged rows with remapped FKs.
 
-Sequences need no reset: inserts draw from the target's existing sequences, so keys stay
-monotonic and never collide with preserved target rows.
+**Sequences.** Each surrogate table declares its target `sequence:`. New rows allocate keys via
+`sequence.NEXTVAL`, which advances the sequence past every id the engine assigns — so keys stay
+monotonic, never collide with preserved target rows, and the application's next insert cannot
+collide either. No separate "advance" step is needed. Applying is **refused** if any surrogate
+table lacks a sequence (`unsequenced_surrogates`): the fallback (`MAX(id) + ROWNUM`) does not
+advance the real sequence and is dev-only, reachable via `--allow-unsequenced`.
 
 ### Referential integrity during load
 
