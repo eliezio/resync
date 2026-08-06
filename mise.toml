@@ -1,0 +1,39 @@
+# mise (https://mise.jdx.dev) bootstrap: Python toolchain, an auto-created venv, and tasks.
+#   mise install        # install the pinned Python
+#   mise run install    # create .venv and install the package (editable) with dev deps
+#   mise run test|guard|print-sql|seed
+
+[tools]
+python = "3.12"
+
+[env]
+# Auto-create and activate .venv for every command in this directory.
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.install]
+description = "Install the package (editable) with dev dependencies"
+run = "pip install -e '.[dev]'"
+
+[tasks.test]
+description = "Run the offline test suite (no database)"
+run = "python tests/test_engine.py"
+
+[tasks.pytest]
+description = "Run tests via pytest"
+run = "pytest"
+
+[tasks.guard]
+description = "Leak guard: refuse proprietary identifiers in committable files"
+run = "./scripts/check-no-proprietary.sh"
+
+[tasks.build-config]
+description = "Flatten catalog.json -> config.skeleton.json and print the load order"
+run = "./build-config.sh"
+
+[tasks.print-sql]
+description = "Render generated SQL for the public sample (offline)"
+run = "python -m resync_engine.cli print-sql"
+
+[tasks.seed]
+description = "Draft a resync.yaml from config.skeleton.json"
+run = "python -m resync_engine.cli seed-config --catalog config.skeleton.json"
