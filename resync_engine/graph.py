@@ -13,7 +13,8 @@ class CycleError(Exception):
     pass
 
 
-def load_order(schema: Schema, scope: set[str]) -> list[str]:
+def load_order(schema: Schema, scope: set[str],
+               extra_parents: dict[str, set[str]] | None = None) -> list[str]:
     """Kahn topological sort restricted to `scope`; parents first.
 
     Only edges whose parent is also in scope constrain the order — an FK to an out-of-scope
@@ -21,11 +22,19 @@ def load_order(schema: Schema, scope: set[str]) -> list[str]:
     """
     parents: dict[str, set[str]] = {t: set() for t in scope}
     children: dict[str, set[str]] = {t: set() for t in scope}
+    def _add(child: str, parent: str) -> None:
+        if parent in scope and parent != child:
+            parents[child].add(parent)
+            children[parent].add(child)
+
     for t in scope:
         for fk in schema.tables[t].fks:
-            if fk.parent in scope and fk.parent != t:
-                parents[t].add(fk.parent)
-                children[fk.parent].add(t)
+            _add(t, fk.parent)
+    # Manually declared (unenforced) FKs — invisible to the catalog but they still constrain order.
+    for child, ps in (extra_parents or {}).items():
+        if child in scope:
+            for parent in ps:
+                _add(child, parent)
 
     ready = sorted(t for t in scope if not parents[t])
     order: list[str] = []
