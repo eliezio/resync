@@ -249,8 +249,11 @@ Implemented in [`resync_engine/`](./resync_engine):
   on non-nullable ones.
 - `plan.py` — classify surrogate vs natural identity; propagate **surrogate lineage** so a
   surrogate value is remapped through its *origin* table's id-map wherever it reappears.
-- `sqlgen.py` — generate set-based SQL: single `MERGE` for natural/value tables; a 5-step
-  id-map sequence (create / match / allocate / insert / update) for surrogate tables.
+- `sqlgen.py` — generate set-based SQL: single `MERGE` for natural/value tables, a 5-step id-map
+  sequence (create / match / allocate / insert / update) for surrogate tables, a content-hash
+  `MERGE` for hash mode, and `TRUNCATE`+reload; plus a scoped `DELETE` for owned children
+  (delete-orphan) and a deferred second-pass `MERGE` for nullable cycles/self-refs. Matching uses
+  `_expr`, written values use `_write_expr` (audit-override), kept strictly separate.
 - `runner.py` — dry-run counts, then apply all DML in one transaction; FK constraint
   disable/re-enable-with-validate; drop id-maps after.
 - `seed.py` — `seed-config`: draft a `resync.yaml` from the catalog with review markers.
