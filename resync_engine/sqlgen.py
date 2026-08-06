@@ -39,6 +39,26 @@ def _expr(p: TablePlan, col: str, s_alias: str = "s") -> str:
     return f"{s_alias}.{col}"
 
 
+_HASH_NULL = "~RSNULL~"  # sentinel so NULL and empty-string hash differently
+
+
+def _hash_of(p: TablePlan, cols: list[str], source_side: bool) -> str:
+    """STANDARD_HASH(SHA256) over `cols`, canonicalised. Source side remaps FK columns to target
+    surrogates (via id-map) so the hash matches the target side. Determinism relies on the session
+    NLS set by the runner (date/timestamp/number formats)."""
+    def val(c: str) -> str:
+        return _expr(p, c) if source_side else f"d.{c}"
+    parts = " || '|' || ".join(f"NVL(TO_CHAR({val(c)}), '{_HASH_NULL}')" for c in cols)
+    return f"STANDARD_HASH({parts}, 'SHA256')"
+
+
+def _match_on(p: TablePlan) -> str:
+    """Condition matching a staging row (s / remapped) to a target row (d)."""
+    if p.mode == "hash":
+        return f"{_hash_of(p, p.hash_cols, False)} = {_hash_of(p, p.hash_cols, True)}"
+    return " AND ".join(f"d.{c} = {_expr(p, c)}" for c in p.identity)
+
+
 def create_idmap(p: TablePlan, stg: str) -> str:
     return (
         f"CREATE TABLE {idmap_name(stg, p.name)} "
@@ -210,12 +230,42 @@ def reload_table(p: TablePlan, stg: str, tgt: str) -> list[str]:
     ]
 
 
+def merge_hash(p: TablePlan, stg: str, tgt: str) -> str:
+    """MERGE keyed on a content hash, for wide value rows. Scoped to tables without a surrogate
+    and without delete_orphans."""
+    if p.surrogate:
+        raise NotImplementedError(f"{p.name}: hash mode with a surrogate key not supported; use value mode")
+    if p.delete_orphans:
+        raise NotImplementedError(f"{p.name}: hash mode with delete_orphans not supported")
+    cols = p.columns
+    joins = "\n    ".join(_remap_joins(p, stg))
+    select = ",\n           ".join(f"{_expr(p, c)} AS {c}" for c in cols)
+    src_hash = _hash_of(p, p.hash_cols, source_side=True)
+    tgt_hash = _hash_of(p, p.hash_cols, source_side=False)
+    non_hash = [c for c in cols if c not in p.hash_cols]     # audit columns to refresh on match
+    set_clause = ",\n       ".join(f"d.{c} = x.{c}" for c in non_hash) or f"d.{cols[0]} = x.{cols[0]}"
+    insert_cols = ", ".join(cols)
+    insert_vals = ", ".join(f"x.{c}" for c in cols)
+    return f"""MERGE INTO {tgt}.{p.name} d
+USING (
+    SELECT {select},
+           {src_hash} AS RESYNC_HASH
+    FROM {stg}.{p.name} s
+    {joins}
+  ) x
+ON ({tgt_hash} = x.RESYNC_HASH)
+WHEN MATCHED THEN UPDATE SET
+       {set_clause}
+WHEN NOT MATCHED THEN INSERT ({insert_cols})
+VALUES ({insert_vals})"""
+
+
 def statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
     """Ordered DML for one table."""
     if p.mode == "reload":
         return reload_table(p, stg, tgt)
     if p.mode == "hash":
-        raise NotImplementedError("hash mode: add STANDARD_HASH identity generation")
+        return [merge_hash(p, stg, tgt)]
     if p.needs_idmap:
         stmts = [
             create_idmap(p, stg),
@@ -234,7 +284,7 @@ def statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
 def dryrun_counts(p: TablePlan, stg: str, tgt: str) -> str:
     """One row: matched / to_insert / target_only, without changing anything."""
     joins = "\n    ".join(_remap_joins(p, stg))
-    on = " AND ".join(f"d.{c} = {_expr(p, c)}" for c in p.identity)
+    on = _match_on(p)
     return f"""SELECT
   (SELECT COUNT(*) FROM {stg}.{p.name} s {joins}
      WHERE EXISTS (SELECT 1 FROM {tgt}.{p.name} d WHERE {on}))            AS matched,

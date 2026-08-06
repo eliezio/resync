@@ -69,6 +69,11 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     conn.autocommit = False
     cur = conn.cursor()
+    # Deterministic rendering so hash-mode canonicalization (TO_CHAR) is stable across sessions.
+    for _stmt in ("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'",
+                  "ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF6'",
+                  "ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'"):
+        cur.execute(_stmt)
     try:
         print(f"{'TABLE':40} {'matched':>9} {'insert':>9} {'tgt-only':>9}")
         for name in order:
