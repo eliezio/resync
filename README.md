@@ -73,6 +73,36 @@ flowchart TD
     class VER,CLEAN done;
 ```
 
+### How a table is classified
+
+The pipeline above is the runtime sequence; this is how each table's config selects its SQL shape
+(dashed = optional add-on step):
+
+```mermaid
+flowchart TD
+    T["Table<br/>(reviewed config)"] --> MODE{"mode?"}
+    MODE -->|out_of_scope| OOS["left untouched"]
+    MODE -->|reload| RL["TRUNCATE + reload"]
+    MODE -->|hash| HS["hash MERGE<br/>(STANDARD_HASH)"]
+    MODE -->|"natural / value"| SUR{"surrogate PK?"}
+    SUR -->|yes| IDM["5-step id-map<br/>create · match · allocate · insert · update"]
+    SUR -->|no| MN["single MERGE<br/>update / insert / leave target-only"]
+
+    IDM -.->|delete_orphans| DO["＋ scoped DELETE<br/>(owned child)"]
+    MN  -.->|delete_orphans| DO
+    IDM -.->|"nullable cycle / self-ref"| DF["＋ deferred 2nd-pass MERGE"]
+
+    classDef dec   fill:#9b59b6,stroke:#5e356e,color:#fff;
+    classDef write fill:#5cb85c,stroke:#2d6a2d,color:#fff;
+    classDef keep  fill:#9aa0a6,stroke:#5f6368,color:#fff;
+    classDef fix   fill:#e67e22,stroke:#a5541a,color:#fff;
+
+    class MODE,SUR dec;
+    class RL,HS,IDM,MN write;
+    class OOS keep;
+    class DO,DF fix;
+```
+
 See [DESIGN.md](DESIGN.md) for the full strategy, decisions, and runbook, and
 [CONTEXT.md](CONTEXT.md) for the domain glossary.
 
