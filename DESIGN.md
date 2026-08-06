@@ -81,7 +81,7 @@ match** — those are the preserved target-only rows.
 | 2 | Handle rows deleted on source | **Stateless, no baseline** | No cross-run state. Source-deleted rows are indistinguishable from new target rows and are kept (stale accumulation accepted). See ADR-0001. |
 | 3 | Source of natural identity | **Reviewed config, seeded from constraints** | Natural keys are frequently not constraint-enforced in this schema; a reviewed file is the only trustworthy source. `*_CD` columns default to identity by convention. |
 | 4 | PII masking | **None** | Lower environments cleared to hold verbatim production data. (Compliance risk flagged and accepted.) |
-| 5 | Cycles | **Detect always; null-then-update for nullable back-edges; fail loud otherwise** | The current schema is acyclic with no self-references, but detection guards against future drift. |
+| 5 | Cycles | **Detect always; null-then-update for nullable back-edges; fail loud otherwise** | Implemented: `graph.load_order` breaks a nullable back-edge (or nullable self-reference), records it as *deferred*; the deferred FK column is inserted `NULL` and set in a second-pass `MERGE` (`sqlgen.deferred_update`) after all rows exist. Non-nullable cycles raise `CycleError`. The current schema is acyclic, but this guards against drift. |
 | 6 | Execution topology | **Staging schema on target; Data Pump file handoff; local set-based MERGE** | Merge logic runs in-DB (fast, transactional); production is read-only; a dump-file handoff needs no live network path from a lower environment into production. |
 | 7 | Identity-less tables | **Per-table mode: natural / value / hash / reload / out_of_scope** | Forces every table to a conscious classification; no silent behaviour. |
 | 8 | Engine runtime | **Python orchestrator generating in-DB SQL** | Config parsing, topological sort, cycle detection and validation in Python; heavy data work as set-based `MERGE` executed via `python-oracledb`. |
@@ -172,6 +172,9 @@ constraint.
    their subtree is preserved. Oracle `MERGE` cannot delete not-matched-by-source rows, so this is
    a separate statement.
 5. `reload` tables skip matching: `TRUNCATE` then insert all staged rows with remapped FKs.
+6. **Deferred FK second pass** (nullable cycles / self-references): FK columns dropped to break
+   a cycle are inserted `NULL`, then set by a `MERGE` after every table is loaded, so both
+   endpoints exist.
 
 **Sequences.** Each surrogate table declares its target `sequence:`. New rows allocate keys via
 `sequence.NEXTVAL`, which advances the sequence past every id the engine assigns — so keys stay

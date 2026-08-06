@@ -107,8 +107,8 @@ def test_reference_and_roots_never_delete():
 
 def test_cycle_detection():
     from resync_engine.model import Column, ForeignKey, Table
-    a = Table("A", [Column("ID", False, True)], ["ID"], [ForeignKey("fk", "B", True, [("BID", "ID")])])
-    b = Table("B", [Column("ID", False, True)], ["ID"], [ForeignKey("fk", "A", True, [("AID", "ID")])])
+    a = Table("A", [Column("ID", False, True)], ["ID"], [ForeignKey("fk", "B", False, [("BID", "ID")])])
+    b = Table("B", [Column("ID", False, True)], ["ID"], [ForeignKey("fk", "A", False, [("AID", "ID")])])
     schema = Schema({"A": a, "B": b})
     try:
         load_order(schema, {"A", "B"})
@@ -167,6 +167,52 @@ def test_unsequenced_surrogates_flagged():
     assert unsequenced_surrogates(order, plans) == []      # sample is fully sequenced
     plans["SALES_ORDER"].sequence = None                    # drop one
     assert unsequenced_surrogates(order, plans) == ["SALES_ORDER"]
+
+
+def test_nullable_mutual_cycle_breaks():
+    from resync_engine.model import Column, ForeignKey, Table
+    a = Table("A", [Column("ID", False, True), Column("BID", True, False)], ["ID"],
+              [ForeignKey("A_B_FK", "B", True, [("BID", "ID")])])    # nullable -> breakable
+    b = Table("B", [Column("ID", False, True), Column("AID", False, False)], ["ID"],
+              [ForeignKey("B_A_FK", "A", False, [("AID", "ID")])])   # non-nullable
+    schema = Schema({"A": a, "B": b})
+    deferred: list = []
+    order = load_order(schema, {"A", "B"}, None, deferred)
+    assert set(order) == {"A", "B"} and len(order) == 2
+    assert deferred and deferred[0][0] == "A"   # the nullable A->B edge was broken
+
+
+def test_nullable_self_ref_deferred():
+    from resync_engine.model import (Column, Config as Cfg, ForeignKey, Schema as Sch, Table,
+                                     TableConfig)
+    emp = Table("EMP",
+                [Column("EMP_ID", False, True), Column("EMP_CD", False, False),
+                 Column("EMP_NAME", False, False), Column("MANAGER_ID", True, False)],
+                ["EMP_ID"],
+                [ForeignKey("EMP_MGR_FK", "EMP", True, [("MANAGER_ID", "EMP_ID")])])
+    schema = Sch({"EMP": emp})
+    cfg = Cfg(tables={"EMP": TableConfig(mode="natural", identity=["EMP_CD"], sequence="EMP_SEQ")},
+              audit_exclude=[], staging_schema="STG", target_schema="TGT")
+    order, plans = build_plans(schema, cfg)
+    assert order == ["EMP"]                       # self-loop did not block ordering
+    p = plans["EMP"]
+    assert p.deferred_cols == ["MANAGER_ID"]
+    ins = next(x for x in sqlgen.statements(p, "STG", "TGT") if x.startswith("INSERT INTO TGT.EMP"))
+    assert "NULL AS MANAGER_ID" in ins            # nulled on insert
+    du = sqlgen.deferred_update(p, "STG", "TGT")
+    assert du and du.startswith("MERGE INTO TGT.EMP") and "MANAGER_ID" in du and "IDMAP_EMP" in du
+
+
+def test_non_nullable_self_ref_raises():
+    from resync_engine.model import Column, ForeignKey, Table
+    t = Table("N", [Column("ID", False, True), Column("PARENT_ID", False, False)], ["ID"],
+              [ForeignKey("N_SELF_FK", "N", False, [("PARENT_ID", "ID")])])
+    schema = Schema({"N": t})
+    try:
+        load_order(schema, {"N"})
+        assert False, "expected CycleError"
+    except CycleError:
+        pass
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ class TablePlan:
     delete_orphans: bool = False       # owned child: delete Target children absent from Source
     # column -> origin table whose id-map remaps it (surrogate lineage)
     remaps: dict[str, str] = field(default_factory=dict)
+    # FK columns nulled on insert and set in a second pass (broken nullable cycle / self-ref)
+    deferred_cols: list[str] = field(default_factory=list)
     # columns that look like a surrogate reference but have no resolvable id-map (blocked)
     unresolved: list[str] = field(default_factory=list)
 
@@ -52,7 +54,12 @@ def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, Ta
             continue
         for mf in tc.manual_fks:
             extra_parents.setdefault(name, set()).add(mf["parent"])
-    order = load_order(schema, scope, extra_parents)
+    deferred_edges: list = []
+    order = load_order(schema, scope, extra_parents, deferred_edges)
+    deferred_cols: dict[str, list[str]] = {}
+    for child, fk in deferred_edges:
+        for ccol, _pcol in fk.pairs:
+            deferred_cols.setdefault(child, []).append(ccol)
 
     # origin[(table, column)] = table whose surrogate id-map remaps this column value.
     origin: dict[tuple[str, str], str] = {}
@@ -92,6 +99,7 @@ def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, Ta
             identity=tcfg.identity, pk=tbl.pk, surrogate=surrogate,
             sequence=tcfg.sequence, delete_orphans=tcfg.delete_orphans,
             remaps=remaps, unresolved=unresolved,
+            deferred_cols=deferred_cols.get(name, []),
         )
     return order, plans
 
