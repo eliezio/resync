@@ -278,6 +278,32 @@ def test_seed_config_merge_skips_existing():
     assert (d.get("tables") or {}) == {} or d.get("tables") is None
 
 
+def test_audit_override_writes_expr_not_source():
+    from resync_engine.model import Column, Config as Cfg, Schema as Sch, Table, TableConfig
+    t = Table("R", [Column("R_CD", False, True), Column("V", False, False),
+                    Column("UPDATE_TMSTMP", False, False)], ["R_CD"], [])
+    cfg = Cfg(tables={"R": TableConfig(mode="natural", identity=["R_CD"])},
+              audit_exclude=["UPDATE_TMSTMP"], staging_schema="STG", target_schema="TGT",
+              audit_override={"UPDATE_TMSTMP": "SYSTIMESTAMP"})
+    _order, plans = build_plans(Sch({"R": t}), cfg)
+    stmt = sqlgen.statements(plans["R"], "STG", "TGT")[0]     # merge_natural
+    assert "SYSTIMESTAMP AS UPDATE_TMSTMP" in stmt            # written value overridden
+    assert "s.UPDATE_TMSTMP" not in stmt                       # source value not written
+    assert "d.R_CD = x.R_CD" in stmt                          # matching still on identity
+    # a non-audit column is untouched
+    assert "s.V AS V" in stmt
+
+
+def test_audit_override_ignored_when_column_absent():
+    from resync_engine.model import Column, Config as Cfg, Schema as Sch, Table, TableConfig
+    t = Table("R", [Column("R_CD", False, True), Column("V", False, False)], ["R_CD"], [])
+    cfg = Cfg(tables={"R": TableConfig(mode="natural", identity=["R_CD"])},
+              audit_exclude=[], staging_schema="STG", target_schema="TGT",
+              audit_override={"UPDATE_TMSTMP": "SYSTIMESTAMP"})
+    _order, plans = build_plans(Sch({"R": t}), cfg)
+    assert plans["R"].audit_override == {}                    # column not present -> no override
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
