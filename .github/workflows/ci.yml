@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install PyYAML
+
+      # The proprietary denylist is not in the repo (gitignored). Materialize it from a repo
+      # secret so the leak guard has stems to match. On fork PRs the secret is unavailable, so
+      # .denylist is empty and the guard no-ops — the local pre-commit hook is the primary gate.
+      - name: Materialize denylist from secret
+        env:
+          DENY: ${{ secrets.PROPRIETARY_DENYLIST }}
+        run: printf '%s\n' "$DENY" > .denylist
+
+      - name: Leak guard
+        run: ./scripts/check-no-proprietary.sh
+
+      - name: Offline tests
+        run: python tests/test_engine.py
+
+      - name: SQL generation smoke test
+        run: python -m resync_engine.cli print-sql > /dev/null

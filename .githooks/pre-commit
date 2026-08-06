@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Versioned pre-commit hook. Enable once with:
+#   git config core.hooksPath .githooks
+# Blocks the commit if the leak guard or the offline tests fail.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+
+"$root/scripts/check-no-proprietary.sh"
+
+if [ -x "$root/.venv/bin/python" ]; then
+  PY="$root/.venv/bin/python"
+else
+  PY="$(command -v python3 || command -v python)"
+fi
+"$PY" "$root/tests/test_engine.py" >/dev/null
+
+echo "pre-commit: leak guard + tests passed"

@@ -1,0 +1,90 @@
+"""Per-table execution plan: classify surrogate vs natural identity, and resolve which columns
+carry a surrogate value that must be remapped through a parent id-map.
+
+The key subtlety is *surrogate lineage*: a surrogate value propagates down through composite
+keys. `ORDER_ID` originates in SALES_ORDER (a surrogate PK) and reappears as an FK column in
+ORDER_LINE and again in ORDER_LINE_ALLOC. Every occurrence must be remapped through the
+*order* id-map, even where the local FK points at an intermediate table (ORDER_LINE). We
+propagate the origin in topological order.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .graph import load_order
+from .model import Config, Schema
+
+
+@dataclass
+class TablePlan:
+    name: str
+    mode: str
+    columns: list[str]                 # insertable columns (hidden removed)
+    identity: list[str]
+    pk: list[str]
+    surrogate: str | None              # single surrogate PK column, if any
+    sequence: str | None
+    delete_orphans: bool = False       # owned child: delete Target children absent from Source
+    # column -> origin table whose id-map remaps it (surrogate lineage)
+    remaps: dict[str, str] = field(default_factory=dict)
+    # columns that look like a surrogate reference but have no resolvable id-map (blocked)
+    unresolved: list[str] = field(default_factory=list)
+
+    @property
+    def needs_idmap(self) -> bool:
+        return self.surrogate is not None
+
+
+def _surrogate_of(schema: Schema, cfg_ident: list[str], table_name: str) -> str | None:
+    """A single-column PK that is not part of the declared natural identity is the surrogate."""
+    pk = schema.tables[table_name].pk
+    if len(pk) == 1 and pk[0] not in cfg_ident:
+        return pk[0]
+    return None
+
+
+def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, TablePlan]]:
+    """Return (parents-first order, plans) for all in-scope tables (mode != out_of_scope)."""
+    scope = {n for n, c in config.tables.items() if c.mode != "out_of_scope"}
+    order = load_order(schema, scope)
+
+    # origin[(table, column)] = table whose surrogate id-map remaps this column value.
+    origin: dict[tuple[str, str], str] = {}
+    plans: dict[str, TablePlan] = {}
+
+    for name in order:
+        tcfg = config.tables[name]
+        tbl = schema.tables[name]
+        surrogate = _surrogate_of(schema, tcfg.identity, name)
+        if surrogate is not None:
+            origin[(name, surrogate)] = name  # a surrogate is its own origin
+
+        remaps: dict[str, str] = {}
+        unresolved: list[str] = []
+
+        # Enforced FKs + any manually declared logical FKs.
+        fk_specs = [(fk.parent, fk.pairs) for fk in tbl.fks]
+        for mf in tcfg.manual_fks:
+            fk_specs.append((mf["parent"], [tuple(p.split("->")) for p in mf["columns"]]))
+
+        for parent, pairs in fk_specs:
+            for child_col, parent_col in pairs:
+                key = (parent, parent_col)
+                if key in origin:                      # parent column carries a surrogate
+                    remaps[child_col] = origin[key]
+                    origin[(name, child_col)] = origin[key]  # propagate lineage downward
+
+        # A declared-identity column that references an out-of-scope surrogate we cannot remap
+        # is a blocker (an *_ID identity column with no resolvable id-map).
+        for col in tcfg.identity:
+            if col.endswith("_ID") and col != surrogate and col not in remaps:
+                # Heuristic: an *_ID identity column with no id-map is suspicious.
+                unresolved.append(col)
+
+        plans[name] = TablePlan(
+            name=name, mode=tcfg.mode, columns=tbl.data_columns,
+            identity=tcfg.identity, pk=tbl.pk, surrogate=surrogate,
+            sequence=tcfg.sequence, delete_orphans=tcfg.delete_orphans,
+            remaps=remaps, unresolved=unresolved,
+        )
+    return order, plans
