@@ -256,6 +256,28 @@ def test_hash_mode_rejects_surrogate():
         pass
 
 
+def test_seed_config_classifies_sample():
+    import yaml
+    from resync_engine import seed
+    d = yaml.safe_load(seed.seed_config(CATALOG, target="SALES"))
+    t = d["tables"]
+    assert t["CURRENCY"]["mode"] == "natural" and t["CURRENCY"]["identity"] == ["CURRENCY_CD"]
+    assert t["CUSTOMER"]["mode"] == "natural" and t["CUSTOMER"]["identity"] == ["CUSTOMER_CD"]
+    assert t["SALES_ORDER"]["identity"] == ["ORDER_NO"]
+    assert t["ORDER_LINE"]["mode"] == "value"
+    assert set(t["ORDER_LINE"]["identity"]) == {"ORDER_ID", "LINE_NO"}
+    assert t["ORDER_LINE"].get("delete_orphans") is True
+    assert "UPDATE_ID" in d["audit_exclude"] and "VERSION_ID" in d["audit_exclude"]
+
+
+def test_seed_config_merge_skips_existing():
+    from resync_engine import seed
+    import yaml
+    d = yaml.safe_load(seed.seed_config(CATALOG, existing_path=CONFIG))  # sample_resync.yaml
+    # every sample table is already in the config, so a merge seeds nothing
+    assert (d.get("tables") or {}) == {} or d.get("tables") is None
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

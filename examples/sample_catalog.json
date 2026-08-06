@@ -1,81 +1,411 @@
 {
   "_comment": "Synthetic sample schema (Order/OrderLine domain) in config.skeleton.json format. Exercises every engine feature: reference tables, surrogate roots with in-place VERSION_ID, owned children with delete-orphan, surrogate-lineage remap, and FK-to-code (no remap). Contains no proprietary identifiers.",
   "edges": [
-    {"fk": "PRODUCT_CURRENCY_FK", "child": "PRODUCT", "parent": "CURRENCY", "nullable": false, "columns": ["CURRENCY_CD->CURRENCY_CD"]},
-    {"fk": "ORDER_CUSTOMER_FK", "child": "SALES_ORDER", "parent": "CUSTOMER", "nullable": false, "columns": ["CUSTOMER_ID->CUSTOMER_ID"]},
-    {"fk": "ORDER_STATUS_FK", "child": "SALES_ORDER", "parent": "ORDER_STATUS", "nullable": false, "columns": ["STATUS_CD->STATUS_CD"]},
-    {"fk": "ORDER_CURRENCY_FK", "child": "SALES_ORDER", "parent": "CURRENCY", "nullable": false, "columns": ["CURRENCY_CD->CURRENCY_CD"]},
-    {"fk": "LINE_ORDER_FK", "child": "ORDER_LINE", "parent": "SALES_ORDER", "nullable": false, "columns": ["ORDER_ID->ORDER_ID"]},
-    {"fk": "LINE_PRODUCT_FK", "child": "ORDER_LINE", "parent": "PRODUCT", "nullable": false, "columns": ["PRODUCT_ID->PRODUCT_ID"]},
-    {"fk": "LINE_CURRENCY_FK", "child": "ORDER_LINE", "parent": "CURRENCY", "nullable": false, "columns": ["CURRENCY_CD->CURRENCY_CD"]},
-    {"fk": "LABEL_ORDER_FK", "child": "ORDER_LABEL", "parent": "SALES_ORDER", "nullable": false, "columns": ["ORDER_ID->ORDER_ID"]},
-    {"fk": "ALLOC_LINE_FK", "child": "ORDER_LINE_ALLOC", "parent": "ORDER_LINE", "nullable": false, "columns": ["ORDER_ID->ORDER_ID", "LINE_NO->LINE_NO"]}
+    {
+      "fk": "PRODUCT_CURRENCY_FK",
+      "child": "PRODUCT",
+      "parent": "CURRENCY",
+      "nullable": false,
+      "columns": [
+        "CURRENCY_CD->CURRENCY_CD"
+      ]
+    },
+    {
+      "fk": "ORDER_CUSTOMER_FK",
+      "child": "SALES_ORDER",
+      "parent": "CUSTOMER",
+      "nullable": false,
+      "columns": [
+        "CUSTOMER_ID->CUSTOMER_ID"
+      ]
+    },
+    {
+      "fk": "ORDER_STATUS_FK",
+      "child": "SALES_ORDER",
+      "parent": "ORDER_STATUS",
+      "nullable": false,
+      "columns": [
+        "STATUS_CD->STATUS_CD"
+      ]
+    },
+    {
+      "fk": "ORDER_CURRENCY_FK",
+      "child": "SALES_ORDER",
+      "parent": "CURRENCY",
+      "nullable": false,
+      "columns": [
+        "CURRENCY_CD->CURRENCY_CD"
+      ]
+    },
+    {
+      "fk": "LINE_ORDER_FK",
+      "child": "ORDER_LINE",
+      "parent": "SALES_ORDER",
+      "nullable": false,
+      "columns": [
+        "ORDER_ID->ORDER_ID"
+      ]
+    },
+    {
+      "fk": "LINE_PRODUCT_FK",
+      "child": "ORDER_LINE",
+      "parent": "PRODUCT",
+      "nullable": false,
+      "columns": [
+        "PRODUCT_ID->PRODUCT_ID"
+      ]
+    },
+    {
+      "fk": "LINE_CURRENCY_FK",
+      "child": "ORDER_LINE",
+      "parent": "CURRENCY",
+      "nullable": false,
+      "columns": [
+        "CURRENCY_CD->CURRENCY_CD"
+      ]
+    },
+    {
+      "fk": "LABEL_ORDER_FK",
+      "child": "ORDER_LABEL",
+      "parent": "SALES_ORDER",
+      "nullable": false,
+      "columns": [
+        "ORDER_ID->ORDER_ID"
+      ]
+    },
+    {
+      "fk": "ALLOC_LINE_FK",
+      "child": "ORDER_LINE_ALLOC",
+      "parent": "ORDER_LINE",
+      "nullable": false,
+      "columns": [
+        "ORDER_ID->ORDER_ID",
+        "LINE_NO->LINE_NO"
+      ]
+    }
   ],
   "tables": [
-    {"name": "CURRENCY", "pk_cols": ["CURRENCY_CD"], "columns": [
-      {"name": "CURRENCY_CD", "nullable": false, "in_pk": true},
-      {"name": "CURRENCY_DESC", "nullable": true, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "ORDER_STATUS", "pk_cols": ["STATUS_CD"], "columns": [
-      {"name": "STATUS_CD", "nullable": false, "in_pk": true},
-      {"name": "STATUS_DESC", "nullable": true, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "CUSTOMER", "pk_cols": ["CUSTOMER_ID"], "columns": [
-      {"name": "CUSTOMER_ID", "nullable": false, "in_pk": true},
-      {"name": "CUSTOMER_CD", "nullable": false, "in_pk": false},
-      {"name": "CUSTOMER_NAME", "nullable": true, "in_pk": false},
-      {"name": "VERSION_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "PRODUCT", "pk_cols": ["PRODUCT_ID"], "columns": [
-      {"name": "PRODUCT_ID", "nullable": false, "in_pk": true},
-      {"name": "SKU", "nullable": false, "in_pk": false},
-      {"name": "PRODUCT_NAME", "nullable": true, "in_pk": false},
-      {"name": "CURRENCY_CD", "nullable": false, "in_pk": false},
-      {"name": "VERSION_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "SALES_ORDER", "pk_cols": ["ORDER_ID"], "columns": [
-      {"name": "ORDER_ID", "nullable": false, "in_pk": true},
-      {"name": "ORDER_NO", "nullable": false, "in_pk": false},
-      {"name": "CUSTOMER_ID", "nullable": false, "in_pk": false},
-      {"name": "STATUS_CD", "nullable": false, "in_pk": false},
-      {"name": "CURRENCY_CD", "nullable": false, "in_pk": false},
-      {"name": "ORDER_DATE", "nullable": true, "in_pk": false},
-      {"name": "VERSION_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "ORDER_LINE", "pk_cols": ["ORDER_ID", "LINE_NO"], "columns": [
-      {"name": "ORDER_ID", "nullable": false, "in_pk": true},
-      {"name": "LINE_NO", "nullable": false, "in_pk": true},
-      {"name": "PRODUCT_ID", "nullable": false, "in_pk": false},
-      {"name": "QTY", "nullable": false, "in_pk": false},
-      {"name": "UNIT_PRICE", "nullable": false, "in_pk": false},
-      {"name": "CURRENCY_CD", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "ORDER_LABEL", "pk_cols": ["ORDER_ID", "LABEL_CD"], "columns": [
-      {"name": "ORDER_ID", "nullable": false, "in_pk": true},
-      {"name": "LABEL_CD", "nullable": false, "in_pk": true},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]},
-    {"name": "ORDER_LINE_ALLOC", "pk_cols": ["ORDER_ID", "LINE_NO", "ALLOC_SEQ"], "columns": [
-      {"name": "ORDER_ID", "nullable": false, "in_pk": true},
-      {"name": "LINE_NO", "nullable": false, "in_pk": true},
-      {"name": "ALLOC_SEQ", "nullable": false, "in_pk": true},
-      {"name": "WAREHOUSE_CD", "nullable": false, "in_pk": false},
-      {"name": "QTY", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_ID", "nullable": false, "in_pk": false},
-      {"name": "UPDATE_TMSTMP", "nullable": false, "in_pk": false}
-    ]}
+    {
+      "name": "CURRENCY",
+      "pk_cols": [
+        "CURRENCY_CD"
+      ],
+      "columns": [
+        {
+          "name": "CURRENCY_CD",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "CURRENCY_DESC",
+          "nullable": true,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ]
+    },
+    {
+      "name": "ORDER_STATUS",
+      "pk_cols": [
+        "STATUS_CD"
+      ],
+      "columns": [
+        {
+          "name": "STATUS_CD",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "STATUS_DESC",
+          "nullable": true,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ]
+    },
+    {
+      "name": "CUSTOMER",
+      "pk_cols": [
+        "CUSTOMER_ID"
+      ],
+      "columns": [
+        {
+          "name": "CUSTOMER_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "CUSTOMER_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "CUSTOMER_NAME",
+          "nullable": true,
+          "in_pk": false
+        },
+        {
+          "name": "VERSION_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ],
+      "uniq_candidate_cols": [
+        "CUSTOMER_CD"
+      ]
+    },
+    {
+      "name": "PRODUCT",
+      "pk_cols": [
+        "PRODUCT_ID"
+      ],
+      "columns": [
+        {
+          "name": "PRODUCT_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "SKU",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "PRODUCT_NAME",
+          "nullable": true,
+          "in_pk": false
+        },
+        {
+          "name": "CURRENCY_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "VERSION_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ],
+      "uniq_candidate_cols": [
+        "SKU"
+      ]
+    },
+    {
+      "name": "SALES_ORDER",
+      "pk_cols": [
+        "ORDER_ID"
+      ],
+      "columns": [
+        {
+          "name": "ORDER_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "ORDER_NO",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "CUSTOMER_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "STATUS_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "CURRENCY_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "ORDER_DATE",
+          "nullable": true,
+          "in_pk": false
+        },
+        {
+          "name": "VERSION_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ],
+      "uniq_candidate_cols": [
+        "ORDER_NO"
+      ]
+    },
+    {
+      "name": "ORDER_LINE",
+      "pk_cols": [
+        "ORDER_ID",
+        "LINE_NO"
+      ],
+      "columns": [
+        {
+          "name": "ORDER_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "LINE_NO",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "PRODUCT_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "QTY",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UNIT_PRICE",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "CURRENCY_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ]
+    },
+    {
+      "name": "ORDER_LABEL",
+      "pk_cols": [
+        "ORDER_ID",
+        "LABEL_CD"
+      ],
+      "columns": [
+        {
+          "name": "ORDER_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "LABEL_CD",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ]
+    },
+    {
+      "name": "ORDER_LINE_ALLOC",
+      "pk_cols": [
+        "ORDER_ID",
+        "LINE_NO",
+        "ALLOC_SEQ"
+      ],
+      "columns": [
+        {
+          "name": "ORDER_ID",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "LINE_NO",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "ALLOC_SEQ",
+          "nullable": false,
+          "in_pk": true
+        },
+        {
+          "name": "WAREHOUSE_CD",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "QTY",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_ID",
+          "nullable": false,
+          "in_pk": false
+        },
+        {
+          "name": "UPDATE_TMSTMP",
+          "nullable": false,
+          "in_pk": false
+        }
+      ]
+    }
   ]
 }

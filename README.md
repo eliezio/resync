@@ -46,6 +46,7 @@ See [DESIGN.md](DESIGN.md) for the full strategy, decisions, and runbook, and
 | `extract-schema.sh` | Extract the schema to `catalog.json` with SchemaCrawler. |
 | `extract.jq`, `build-config.sh` | Flatten the catalog to `config.skeleton.json`; verify acyclic; print load order. |
 | `resync_engine/` | Python engine: model, graph (topo sort), plan (identity + surrogate lineage), sqlgen, runner, CLI. |
+| `resync_engine/seed.py` | `seed-config`: draft a `resync.yaml` from the catalog with review markers. |
 | `examples/` | Synthetic **Order/OrderLine** sample — the public, proprietary-free worked example. |
 | `tests/` | Offline tests (no database). |
 | `docs/adr/` | Architecture decision records. |
@@ -72,7 +73,13 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
    gitignored because it carries real identifiers. Set `GRAPH=` to skip it, or `GRAPH=erd.svg`
    for another format.
 
-2. **Author `resync.yaml`** from the skeleton. Per table pick a matching mode
+2. **Draft `resync.yaml`** with `seed-config`, then review it:
+   ```bash
+   python -m resync_engine.cli seed-config --catalog config.skeleton.json > resync.yaml
+   ```
+   It seeds the confident classifications and marks judgment calls with `TODO`/`CONFIRM`
+   (mutable-in-identity columns, ownership/delete policy, `manual_fks`, sequence names) — the
+   generator cannot infer those. Per table pick a matching mode
    (`natural | value | hash | reload | out_of_scope`) and its identity columns. Conventions:
    `*_CD` columns are natural keys; exclude `VERSION_ID`/`UPDATE_*`/`INSERT_*`/`*_IND` audit
    columns; value objects key on parent FK + discriminator (usually the composite PK); flag owned
