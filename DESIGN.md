@@ -326,6 +326,9 @@ restoring the target from its pre-run backup.
    acyclic.
 2. **Dry-run:** engine prints per-table insert/update/preserved counts; sanity-check totals.
 3. **Round-trip test on a scratch schema:**
+   Implemented in `tests/integration/test_roundtrip.py` (opt-in; skipped unless a database is
+   reachable via `RESYNC_TEST_*` env or a `gvenzl/oracle-free` testcontainer). It seeds a target +
+   staging, applies, and asserts the properties below.
    - Seed a target from a source snapshot.
    - Insert known target-only rows; edit and delete some source rows.
    - Re-run; assert: target-only rows survive; source edits applied; every FK resolves

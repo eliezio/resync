@@ -1,0 +1,19 @@
+name: integration
+
+# Heavy (spins a real Oracle) — run manually, not on every push.
+on:
+  workflow_dispatch:
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with integration deps
+        run: pip install -e '.[integration]'
+      - name: Round-trip test (testcontainers → gvenzl/oracle-free)
+        run: pytest tests/integration -q
