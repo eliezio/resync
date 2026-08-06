@@ -110,6 +110,8 @@ SchemaCrawler catalog, yielding [`config.skeleton.json`](./config.skeleton.json)
 
 ## Architecture
 
+> A colored version of this flow is the [pipeline diagram](README.md#how-it-works) in the README.
+
 ```
  production (read-only)                target database (DEV/TEST/PERF)
  ┌───────────────────┐   dump file    ┌───────────────────────────────┐
@@ -155,6 +157,9 @@ Fields per table: `mode` (natural | value | hash | reload | out_of_scope), `iden
 constraint.
 
 ### Algorithm per table (parent-first)
+
+> See the [per-table classification diagram](README.md#how-a-table-is-classified) for how a table's
+> config routes to one of these SQL shapes.
 
 1. **Resolve foreign keys.** For each FK column, look up the parent's id-map to translate the
    staged source key into the target key. Value-Object and hash identities that reference a
