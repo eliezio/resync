@@ -55,10 +55,13 @@ See [DESIGN.md](DESIGN.md) for the full strategy, decisions, and runbook, and
 ## Quickstart (no database)
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python tests/test_engine.py            # offline tests
-.venv/bin/python -m resync_engine.cli print-sql  # generated SQL for the Order/OrderLine sample
+.venv/bin/resync print-sql                       # generated SQL for the Order/OrderLine sample
 ```
+
+Or with [mise](https://mise.jdx.dev): `mise run install`, then `mise run test` / `mise run print-sql`.
+Installed as a package the CLI is the `resync` command (equivalently `python -m resync_engine.cli`).
 
 ## Using it on a real schema
 
