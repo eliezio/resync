@@ -105,12 +105,15 @@ the audit-exclude set. Including it would make a row stop matching itself after 
 
 ### Hash-identity
 
-Synthetic identity = `STANDARD_HASH(SHA256)` over selected columns. Excludes surrogate key,
-audit columns (`UPDATE_ID`, `UPDATE_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags) and
-per-environment columns; substitutes each foreign key with its parent's natural identity (resolved in
-topological order); canonicalises every value before hashing (NULL sentinel, fixed number/date
-masks, `TRIM`). A content hash, so any edit to an included column changes identity — under the
-stateless model that leaks a stale duplicate, so it is used only for immutable Value rows.
+Synthetic identity = `STANDARD_HASH(SHA256)` over the data columns minus the surrogate key,
+audit columns (`UPDATE_ID`, `UPDATE_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags) and any
+`hash_exclude`. Each foreign key in the hash is **remapped through its parent's id-map** (surrogate
+lineage, topological order) so the source and target sides — expressed in the same target-surrogate
+terms — hash alike. Values are canonicalised before hashing (NULL sentinel; `TO_CHAR` made
+deterministic by session NLS for date/timestamp/number set by the runner). A content hash, so any
+edit to an included column changes identity — under the stateless model that leaks a stale
+duplicate, so it is used only for effectively-immutable Value rows. Scoped to tables without a
+surrogate key and without `delete_orphans`.
 
 ### Out of scope
 

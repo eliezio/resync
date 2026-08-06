@@ -29,6 +29,8 @@ class TablePlan:
     remaps: dict[str, str] = field(default_factory=dict)
     # FK columns nulled on insert and set in a second pass (broken nullable cycle / self-ref)
     deferred_cols: list[str] = field(default_factory=list)
+    # columns hashed to form identity (hash mode): data columns minus surrogate/audit/hash_exclude
+    hash_cols: list[str] = field(default_factory=list)
     # columns that look like a surrogate reference but have no resolvable id-map (blocked)
     unresolved: list[str] = field(default_factory=list)
 
@@ -94,12 +96,20 @@ def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, Ta
                 # Heuristic: an *_ID identity column with no id-map is suspicious.
                 unresolved.append(col)
 
+        hash_cols: list[str] = []
+        if tcfg.mode == "hash":
+            excl = set(config.audit_exclude) | set(tcfg.hash_exclude)
+            if surrogate:
+                excl.add(surrogate)
+            hash_cols = [c for c in tbl.data_columns if c not in excl]
+
         plans[name] = TablePlan(
             name=name, mode=tcfg.mode, columns=tbl.data_columns,
             identity=tcfg.identity, pk=tbl.pk, surrogate=surrogate,
             sequence=tcfg.sequence, delete_orphans=tcfg.delete_orphans,
             remaps=remaps, unresolved=unresolved,
             deferred_cols=deferred_cols.get(name, []),
+            hash_cols=hash_cols,
         )
     return order, plans
 
