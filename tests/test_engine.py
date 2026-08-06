@@ -161,6 +161,14 @@ def test_constraint_handling_default_is_disable():
     assert cfg.constraint_handling == "disable"
 
 
+def test_unsequenced_surrogates_flagged():
+    from resync_engine.plan import unsequenced_surrogates
+    _, _, order, plans = _plans()
+    assert unsequenced_surrogates(order, plans) == []      # sample is fully sequenced
+    plans["SALES_ORDER"].sequence = None                    # drop one
+    assert unsequenced_surrogates(order, plans) == ["SALES_ORDER"]
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

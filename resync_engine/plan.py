@@ -100,3 +100,10 @@ def fk_constraints(schema: Schema, order: list[str]) -> list[tuple[str, str]]:
     """(table, constraint_name) for every *enforced* FK on the in-scope tables, in load order.
     Manual (unenforced) FKs are excluded — they have no database constraint to disable/enable."""
     return [(t, fk.name) for t in order for fk in schema.tables[t].fks]
+
+
+def unsequenced_surrogates(order: list[str], plans: dict[str, "TablePlan"]) -> list[str]:
+    """Surrogate tables with no `sequence:` configured. On apply these fall back to MAX+ROWNUM
+    allocation, which does not advance the real sequence and risks colliding with future
+    application inserts — unsafe for production."""
+    return [n for n in order if plans[n].surrogate and not plans[n].sequence]
