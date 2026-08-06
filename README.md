@@ -63,6 +63,12 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
    DB_HOST=... DB_PORT=1521 DB_SERVICE=... DB_SCHEMA=... DB_USER=... DB_PASSWORD=... ./extract-schema.sh
    ./build-config.sh          # -> config.skeleton.json, verifies acyclic, prints load order
    ```
+
+   `extract-schema.sh` also writes `schema.png` — a slimmed foreign-key diagram (relationship
+   columns only). It needs [GraphViz](https://graphviz.org) (`dot`) on the PATH, and is
+   gitignored because it carries real identifiers. Set `GRAPH=` to skip it, or `GRAPH=erd.svg`
+   for another format.
+
 2. **Author `resync.yaml`** from the skeleton. Per table pick a matching mode
    (`natural | value | hash | reload | out_of_scope`) and its identity columns. Conventions:
    `*_CD` columns are natural keys; exclude `VERSION_ID`/`UPDATE_*`/`INSERT_*`/`*_IND` audit
