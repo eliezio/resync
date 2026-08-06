@@ -204,3 +204,12 @@ def dryrun_counts(p: TablePlan, stg: str, tgt: str) -> str:
   (SELECT COUNT(*) FROM {tgt}.{p.name} d
      WHERE NOT EXISTS (SELECT 1 FROM {stg}.{p.name} s {joins} WHERE {on})) AS target_only
 FROM dual"""
+
+
+def disable_constraint(tgt: str, table: str, name: str) -> str:
+    return f"ALTER TABLE {tgt}.{table} DISABLE CONSTRAINT {name}"
+
+
+def enable_constraint(tgt: str, table: str, name: str) -> str:
+    # ENABLE VALIDATE checks existing rows; a residual violation aborts the statement.
+    return f"ALTER TABLE {tgt}.{table} ENABLE VALIDATE CONSTRAINT {name}"

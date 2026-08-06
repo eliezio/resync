@@ -139,6 +139,28 @@ def test_manual_fk_orders_and_remaps():
     assert plans["CHILD"].unresolved == []                    # no longer BLOCKED
 
 
+def test_fk_constraints_listed_in_order():
+    from resync_engine.plan import fk_constraints
+    schema, _, order, _ = _plans()
+    cons = fk_constraints(schema, order)
+    assert ("PRODUCT", "PRODUCT_CURRENCY_FK") in cons
+    assert ("ORDER_LINE", "LINE_ORDER_FK") in cons
+    # only enforced FKs — count equals the catalog edge count (9 in the sample)
+    assert len(cons) == 9
+
+
+def test_constraint_sql_shapes():
+    d = sqlgen.disable_constraint("SALES", "PRODUCT", "PRODUCT_CURRENCY_FK")
+    e = sqlgen.enable_constraint("SALES", "PRODUCT", "PRODUCT_CURRENCY_FK")
+    assert d == "ALTER TABLE SALES.PRODUCT DISABLE CONSTRAINT PRODUCT_CURRENCY_FK"
+    assert e == "ALTER TABLE SALES.PRODUCT ENABLE VALIDATE CONSTRAINT PRODUCT_CURRENCY_FK"
+
+
+def test_constraint_handling_default_is_disable():
+    _, cfg, _, _ = _plans()
+    assert cfg.constraint_handling == "disable"
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
