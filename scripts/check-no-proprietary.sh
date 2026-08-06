@@ -21,7 +21,7 @@ if [ ! -f "$DENYLIST" ]; then
 fi
 
 # Build one case-insensitive alternation from the denylist (skip blank lines and # comments).
-DENY="$(grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" | paste -sd'|' -)"
+DENY="$( { grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" || true; } | paste -sd'|' - )"
 [ -n "$DENY" ] || { echo "$DENYLIST is empty; nothing to check."; exit 0; }
 
 # Files to check = committable = everything except gitignored paths and the denylist itself.
