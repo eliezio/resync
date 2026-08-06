@@ -91,6 +91,7 @@ class Config:
     audit_exclude: list[str]
     staging_schema: str
     target_schema: str
+    constraint_handling: str = "disable"   # disable | defer | none
 
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
@@ -113,4 +114,5 @@ class Config:
             audit_exclude=list(doc.get("audit_exclude", [])),
             staging_schema=doc["staging_schema"],
             target_schema=doc["target_schema"],
+            constraint_handling=doc.get("constraint_handling", "disable"),
         )

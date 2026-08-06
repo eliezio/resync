@@ -94,3 +94,9 @@ def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, Ta
             remaps=remaps, unresolved=unresolved,
         )
     return order, plans
+
+
+def fk_constraints(schema: Schema, order: list[str]) -> list[tuple[str, str]]:
+    """(table, constraint_name) for every *enforced* FK on the in-scope tables, in load order.
+    Manual (unenforced) FKs are excluded — they have no database constraint to disable/enable."""
+    return [(t, fk.name) for t in order for fk in schema.tables[t].fks]

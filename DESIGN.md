@@ -178,9 +178,21 @@ monotonic and never collide with preserved target rows.
 
 ### Referential integrity during load
 
-Disable/defer target FK constraints for the merge, then re-enable **with validation** at the
-end so any breakage aborts the transaction. Topological order still governs id-map
-availability (disabling constraints does not remove the parent-before-child requirement).
+Target FK constraints are loosened for the merge via `constraint_handling` (global config):
+
+- **`disable`** (default) — `ALTER TABLE … DISABLE CONSTRAINT` before the merge, re-enabled
+  `ENABLE VALIDATE` after, so a residual violation aborts. Note these are **DDL**, so each issues
+  an implicit `COMMIT`; the merge itself is one transaction between the DDL bookends, and full-run
+  atomicity relies on the pre-run target backup (see the runbook). On failure the engine re-enables
+  `NOVALIDATE` so constraints aren't left disabled.
+- **`defer`** — `SET CONSTRAINTS ALL DEFERRED`; validated at `COMMIT`, so the entire run is one
+  atomic transaction. Requires the FK constraints to be **DEFERRABLE**.
+- **`none`** — leave constraints as-is; for an acyclic graph the topological order already inserts
+  parents before children.
+
+Only *enforced* FK constraints are touched (`resync_engine/plan.py:fk_constraints`); manually
+declared `manual_fks` have no database constraint. Topological order still governs id-map
+availability regardless (disabling constraints does not remove the parent-before-child requirement).
 
 ## Applying to a schema
 

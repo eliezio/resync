@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from . import sqlgen
 from .model import Config, Schema
-from .plan import TablePlan, build_plans
+from .plan import TablePlan, build_plans, fk_constraints
 
 
 @dataclass
@@ -21,16 +21,17 @@ class Counts:
     target_only: int
 
 
-def plan_all(catalog_path: str, config_path: str) -> tuple[list[str], dict[str, TablePlan], Config]:
+def plan_all(catalog_path: str, config_path: str
+              ) -> tuple[Schema, list[str], dict[str, TablePlan], Config]:
     schema = Schema.from_catalog(catalog_path)
     config = Config.from_yaml(config_path)
     order, plans = build_plans(schema, config)
-    return order, plans, config
+    return schema, order, plans, config
 
 
 def print_sql(catalog_path: str, config_path: str) -> str:
     """Render all generated SQL without a database connection (offline verification)."""
-    order, plans, cfg = plan_all(catalog_path, config_path)
+    _schema, order, plans, cfg = plan_all(catalog_path, config_path)
     out: list[str] = []
     for name in order:
         p = plans[name]
@@ -52,7 +53,7 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
         apply: bool = False) -> None:
     import oracledb  # lazy: not needed for print_sql
 
-    order, plans, cfg = plan_all(catalog_path, config_path)
+    schema, order, plans, cfg = plan_all(catalog_path, config_path)
 
     blocked = [n for n in order if plans[n].unresolved]
     if blocked:
@@ -71,13 +72,45 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
             print("\ndry-run only; no changes made.")
             return
 
+        tgt = cfg.target_schema
+        ch = cfg.constraint_handling
+        cons = fk_constraints(schema, order)
+
+        # Loosen referential integrity for the load.
+        #   defer   — SET CONSTRAINTS ALL DEFERRED: transactional, validated at COMMIT (requires
+        #             the FK constraints to be DEFERRABLE). The whole run is then atomic.
+        #   disable — ALTER ... DISABLE CONSTRAINT: DDL, so each is an implicit COMMIT. The merge
+        #             itself is one transaction between the DDL bookends; full-run atomicity relies
+        #             on the pre-run target backup (see the runbook). Re-enabled WITH VALIDATE so a
+        #             residual violation aborts.
+        #   none    — leave constraints as-is (topological order already satisfies them for a DAG).
+        if ch == "defer":
+            cur.execute("SET CONSTRAINTS ALL DEFERRED")
+        elif ch == "disable":
+            for t, c in cons:
+                cur.execute(sqlgen.disable_constraint(tgt, t, c))
+
+        # --- the merge: one transaction ---
         for name in order:
-            for stmt in sqlgen.statements(plans[name], cfg.staging_schema, cfg.target_schema):
+            for stmt in sqlgen.statements(plans[name], cfg.staging_schema, tgt):
                 cur.execute(stmt)
-        conn.commit()
+
+        conn.commit()  # for defer, this is where deferred constraints validate (violation -> error)
+
+        if ch == "disable":
+            for t, c in cons:
+                cur.execute(sqlgen.enable_constraint(tgt, t, c))  # ENABLE VALIDATE; bad data -> error
         print("\napplied and committed.")
     except Exception:
         conn.rollback()
+        # Do not leave constraints disabled after a failed run; re-enable NOVALIDATE (data may be
+        # partial) so the schema is left consistent for recovery.
+        if apply and cfg.constraint_handling == "disable":
+            for t, c in fk_constraints(schema, order):
+                try:
+                    cur.execute(f"ALTER TABLE {cfg.target_schema}.{t} ENABLE NOVALIDATE CONSTRAINT {c}")
+                except Exception:
+                    pass
         raise
     finally:
         for name in order:
