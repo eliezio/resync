@@ -117,6 +117,28 @@ def test_cycle_detection():
         pass
 
 
+def test_manual_fk_orders_and_remaps():
+    """An unenforced FK declared via manual_fks must constrain load order and resolve remap,
+    so a table referencing an otherwise-isolated parent is not left BLOCKED."""
+    from resync_engine.model import Column, Config as Cfg, Schema as Sch, Table, TableConfig
+    ref = Table("REF", [Column("REF_ID", False, True), Column("REF_CD", False, False)],
+                ["REF_ID"], [])
+    child = Table("CHILD", [Column("CHILD_ID", False, True), Column("REF_ID", False, False),
+                            Column("NAME", False, False)], ["CHILD_ID"], [])
+    schema = Sch({"REF": ref, "CHILD": child})
+    cfg = Cfg(
+        tables={
+            "REF": TableConfig(mode="natural", identity=["REF_CD"]),
+            "CHILD": TableConfig(mode="value", identity=["REF_ID", "NAME"],
+                                 manual_fks=[{"parent": "REF", "columns": ["REF_ID->REF_ID"]}]),
+        },
+        audit_exclude=[], staging_schema="STG", target_schema="TGT")
+    order, plans = build_plans(schema, cfg)
+    assert order.index("REF") < order.index("CHILD"), order   # manual edge fixes the order
+    assert plans["CHILD"].remaps.get("REF_ID") == "REF"       # remap resolves via manual FK
+    assert plans["CHILD"].unresolved == []                    # no longer BLOCKED
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

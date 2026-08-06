@@ -46,7 +46,13 @@ def _surrogate_of(schema: Schema, cfg_ident: list[str], table_name: str) -> str 
 def build_plans(schema: Schema, config: Config) -> tuple[list[str], dict[str, TablePlan]]:
     """Return (parents-first order, plans) for all in-scope tables (mode != out_of_scope)."""
     scope = {n for n, c in config.tables.items() if c.mode != "out_of_scope"}
-    order = load_order(schema, scope)
+    extra_parents: dict[str, set[str]] = {}
+    for name, tc in config.tables.items():
+        if tc.mode == "out_of_scope":
+            continue
+        for mf in tc.manual_fks:
+            extra_parents.setdefault(name, set()).add(mf["parent"])
+    order = load_order(schema, scope, extra_parents)
 
     # origin[(table, column)] = table whose surrogate id-map remaps this column value.
     origin: dict[tuple[str, str], str] = {}
