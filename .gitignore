@@ -13,3 +13,6 @@ __pycache__/
 # Data Pump dumps and generated SQL
 *.dmp
 *.sql
+
+# Generated schema diagrams — derived from the real schema, proprietary
+*.png
