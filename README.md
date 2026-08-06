@@ -36,6 +36,43 @@ for each entity, parents-first:
 verify referential integrity | preserve target-only data | idempotent
 ```
 
+```mermaid
+flowchart TD
+    SRC[("Production<br/>(read-only)")] -->|"expdp FLASHBACK_SCN"| DUMP["dump file"]
+    DUMP -->|"impdp"| STG[("Staging schema<br/>source keys intact")]
+    STG --> ORDER["Topological order<br/>(fail on non-nullable cycle)"]
+    ORDER --> MATCH["Match rows on<br/>natural identity"]
+    MATCH --> IDMAP[["id-map<br/>source key to target key"]]
+    IDMAP --> REMAP["Remap FK columns<br/>via id-maps (surrogate lineage)"]
+    REMAP --> MRG{"MERGE<br/>per table"}
+    MRG -->|matched| UPD["UPDATE from source"]
+    MRG -->|"unmatched source"| INS["INSERT<br/>new key from sequence"]
+    MRG -->|"target-only"| KEEP["leave untouched<br/>(preserved)"]
+    UPD --> ORPH["Owned child:<br/>delete orphans in matched parent"]
+    INS --> ORPH
+    ORPH --> DEF["Deferred 2nd pass<br/>(nullable cycle / self-ref)"]
+    DEF --> VER["Re-enable constraints VALIDATE<br/>dry-run counts · idempotent"]
+    VER --> CLEAN["Drop staging + id-maps"]
+
+    classDef src   fill:#e05a5a,stroke:#8b1a1a,color:#fff;
+    classDef stg   fill:#f6c343,stroke:#7a5c00,color:#000;
+    classDef step  fill:#4a90d9,stroke:#1c4e80,color:#fff;
+    classDef dec   fill:#9b59b6,stroke:#5e356e,color:#fff;
+    classDef write fill:#5cb85c,stroke:#2d6a2d,color:#fff;
+    classDef keep  fill:#9aa0a6,stroke:#5f6368,color:#fff;
+    classDef fix   fill:#e67e22,stroke:#a5541a,color:#fff;
+    classDef done  fill:#16a085,stroke:#0c6b56,color:#fff;
+
+    class SRC src;
+    class DUMP,STG stg;
+    class ORDER,MATCH,IDMAP,REMAP step;
+    class MRG dec;
+    class UPD,INS write;
+    class KEEP keep;
+    class ORPH,DEF fix;
+    class VER,CLEAN done;
+```
+
 See [DESIGN.md](DESIGN.md) for the full strategy, decisions, and runbook, and
 [CONTEXT.md](CONTEXT.md) for the domain glossary.
 
