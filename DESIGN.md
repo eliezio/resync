@@ -220,7 +220,11 @@ To apply to a real schema:
    gitignored `INSTANCE.md` — never in the public repo.
 
 **Audit-exclude set** (never in any identity, excluded from every hash): `UPDATE_ID`,
-`UPDATE_TMSTMP`, `INSERT_ID`, `INSERT_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags.
+`UPDATE_TMSTMP`, `INSERT_ID`, `INSERT_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags. Excluded
+from *matching* only — by default audit columns are **copied verbatim** from Source. To instead
+stamp them with the re-sync, set `audit_override` (global): a map of column to SQL expression
+written on insert and update, e.g. `UPDATE_ID: "'RESYNC'"`, `UPDATE_TMSTMP: "SYSTIMESTAMP"`. It
+affects written values only, never matching.
 
 ## Known limitations
 

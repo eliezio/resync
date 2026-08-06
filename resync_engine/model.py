@@ -92,6 +92,8 @@ class Config:
     staging_schema: str
     target_schema: str
     constraint_handling: str = "disable"   # disable | defer | none
+    # audit column -> SQL expression written on insert/update instead of the source value
+    audit_override: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
@@ -115,4 +117,5 @@ class Config:
             staging_schema=doc["staging_schema"],
             target_schema=doc["target_schema"],
             constraint_handling=doc.get("constraint_handling", "disable"),
+            audit_override=dict(doc.get("audit_override", {})),
         )

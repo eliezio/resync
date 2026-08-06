@@ -33,10 +33,20 @@ def _remap_joins(p: TablePlan, stg: str, s_alias: str = "s") -> list[str]:
 
 
 def _expr(p: TablePlan, col: str, s_alias: str = "s") -> str:
-    """Value expression for a column: remapped id-maps translate, everything else passes through."""
+    """Value expression for a column: remapped id-maps translate, everything else passes through.
+    Used for MATCHING (identity / hash / delete scope)."""
     if col in p.remaps:
         return f"im_{col}.TGT_KEY"
     return f"{s_alias}.{col}"
+
+
+def _write_expr(p: TablePlan, col: str, s_alias: str = "s") -> str:
+    """Value WRITTEN for a column (insert / update). Audit-override columns get their configured SQL
+    expression (e.g. SYSTIMESTAMP); everything else is the source value / remapped id. Never used
+    for matching, so overrides can't affect which rows pair up."""
+    if col in p.audit_override:
+        return p.audit_override[col]
+    return _expr(p, col, s_alias)
 
 
 _HASH_NULL = "~RSNULL~"  # sentinel so NULL and empty-string hash differently
@@ -75,7 +85,7 @@ def merge_natural(p: TablePlan, stg: str, tgt: str) -> str:
     cols = p.columns
     joins = "\n    ".join(_remap_joins(p, stg))
     select = ",\n           ".join(
-        (f"NULL AS {c}" if c in p.deferred_cols else f"{_expr(p, c)} AS {c}") for c in cols)
+        (f"NULL AS {c}" if c in p.deferred_cols else f"{_write_expr(p, c)} AS {c}") for c in cols)
     src = f"""(
     SELECT {select}
     FROM {stg}.{p.name} s
@@ -131,7 +141,7 @@ def insert_surrogate(p: TablePlan, stg: str, tgt: str) -> str:
         elif c in p.deferred_cols:
             exprs.append("NULL")                 # set in a second pass (broken nullable cycle)
         else:
-            exprs.append(_expr(p, c))
+            exprs.append(_write_expr(p, c))
     select = ",\n       ".join(f"{e} AS {c}" for e, c in zip(exprs, p.columns))
     cols = ", ".join(p.columns)
     return f"""INSERT INTO {tgt}.{p.name} ({cols})
@@ -145,7 +155,7 @@ def update_surrogate(p: TablePlan, stg: str, tgt: str) -> str:
     im = idmap_name(stg, p.name)
     joins = "\n    ".join(_remap_joins(p, stg))
     non_sur = [c for c in p.columns if c != p.surrogate and c not in p.deferred_cols]
-    select = ",\n           ".join(f"{_expr(p, c)} AS {c}" for c in non_sur)
+    select = ",\n           ".join(f"{_write_expr(p, c)} AS {c}" for c in non_sur)
     set_clause = ",\n       ".join(f"d.{c} = x.{c}" for c in non_sur)
     return f"""MERGE INTO {tgt}.{p.name} d
 USING (
@@ -222,7 +232,7 @@ WHEN MATCHED THEN UPDATE SET
 
 def reload_table(p: TablePlan, stg: str, tgt: str) -> list[str]:
     joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n       ".join(f"{_expr(p, c)} AS {c}" for c in p.columns)
+    select = ",\n       ".join(f"{_write_expr(p, c)} AS {c}" for c in p.columns)
     cols = ", ".join(p.columns)
     return [
         f"TRUNCATE TABLE {tgt}.{p.name}",
@@ -239,7 +249,7 @@ def merge_hash(p: TablePlan, stg: str, tgt: str) -> str:
         raise NotImplementedError(f"{p.name}: hash mode with delete_orphans not supported")
     cols = p.columns
     joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n           ".join(f"{_expr(p, c)} AS {c}" for c in cols)
+    select = ",\n           ".join(f"{_write_expr(p, c)} AS {c}" for c in cols)
     src_hash = _hash_of(p, p.hash_cols, source_side=True)
     tgt_hash = _hash_of(p, p.hash_cols, source_side=False)
     non_hash = [c for c in cols if c not in p.hash_cols]     # audit columns to refresh on match
