@@ -22,7 +22,7 @@ DB_HOST=… DB_PORT=1521 DB_SERVICE=… DB_SCHEMA=MAS DB_USER=… DB_PASSWORD=�
 ./build-config.sh
 
 # c. Engine: offline SQL preview + tests (no DB)
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python tests/test_engine.py
 .venv/bin/python -m resync_engine.cli print-sql --catalog config.skeleton.json --config resync.yaml
 ```
