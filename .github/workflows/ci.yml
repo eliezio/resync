@@ -16,7 +16,7 @@ jobs:
           cache: pip
 
       - name: Install deps
-        run: pip install PyYAML
+        run: pip install -e '.[dev]'
 
       # The proprietary denylist is not in the repo (gitignored). Materialize it from a repo
       # secret so the leak guard has stems to match. On fork PRs the secret is unavailable, so
