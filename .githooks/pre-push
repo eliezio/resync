@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Versioned pre-push hook (active via: git config core.hooksPath .githooks).
+# Belt-and-suspenders leak guard: checks the working tree AND the exact commit tips being pushed,
+# so a proprietary identifier committed with --no-verify still cannot leave the machine.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+
+# 1. Working-tree guard (same check as pre-commit / CI).
+"$root/scripts/check-no-proprietary.sh"
+
+# 2. Scan the tree at each pushed commit tip against the private denylist.
+DENYLIST="${DENYLIST:-$root/.denylist}"
+if [ -f "$DENYLIST" ]; then
+  DENY="$(grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" | paste -sd'|' -)"
+  if [ -n "$DENY" ]; then
+    zero="0000000000000000000000000000000000000000"
+    while read -r local_ref local_sha remote_ref remote_sha; do
+      [ "$local_sha" = "$zero" ] && continue          # branch deletion
+      if git grep -I -n -iE "$DENY" "$local_sha" -- . ':!.denylist' 2>/dev/null | grep -q .; then
+        echo "LEAK: proprietary identifier in pushed commit $local_sha"
+        git grep -I -n -iE "$DENY" "$local_sha" -- . ':!.denylist' 2>/dev/null | head -10
+        echo
+        echo "Refusing to push. Scrub the offending commit(s) before pushing."
+        exit 1
+      fi
+    done
+  fi
+fi
+
+echo "pre-push: leak guard passed"
