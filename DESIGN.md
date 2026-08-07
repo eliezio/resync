@@ -29,7 +29,7 @@ target-created data makes it a merge rather than a load.
 **Three invariants** everything rests on:
 
 1. **Every row has a stable, environment-portable identity** — a natural key, not the surrogate.
-   A table that cannot state one cannot be merged; it can only be reloaded or skipped.
+   A table that cannot state one cannot be merged; it can only be skipped.
 2. **A surrogate value identifies the same row across environments only through a mapping.** Build
    a `source → target` id-map per entity by matching on natural identity, and translate every
    foreign key through it.
@@ -57,8 +57,7 @@ project (the specifics chosen here are in the decisions table below):
   children mirrored, orphans deleted; target-only root → whole subtree preserved).
 - **Stateless** (no baseline) — no source-delete propagation; stale rows tolerated.
 - A **reviewed identity config** is the source of truth — automation seeds it, humans finish it.
-- Per-table **escape hatches**: reload (source-owned, exact mirror), hash (wide immutable value
-  rows), out-of-scope.
+- Per-table **escape hatch**: out-of-scope (left untouched).
 
 **Why bespoke.** No off-the-shelf tool does natural-key matching, FK remapping, and target-row
 preservation together; commodity tools cover only the edges (schema extraction, data transport).
@@ -83,7 +82,7 @@ match** — those are the preserved target-only rows.
 | 4 | PII masking | **None** | Lower environments cleared to hold verbatim production data. (Compliance risk flagged and accepted.) |
 | 5 | Cycles | **Detect always; null-then-update for nullable back-edges; fail loud otherwise** | Implemented: `graph.load_order` breaks a nullable back-edge (or nullable self-reference), records it as *deferred*; the deferred FK column is inserted `NULL` and set in a second-pass `MERGE` (`sqlgen.deferred_update`) after all rows exist. Non-nullable cycles raise `CycleError`. The current schema is acyclic, but this guards against drift. |
 | 6 | Execution topology | **Staging schema on target; Data Pump file handoff; local set-based MERGE** | Merge logic runs in-DB (fast, transactional); production is read-only; a dump-file handoff needs no live network path from a lower environment into production. |
-| 7 | Identity-less tables | **Per-table mode: natural / value / hash / reload / out_of_scope** | Forces every table to a conscious classification; no silent behaviour. |
+| 7 | Identity-less tables | **Per-table mode: natural / value / out_of_scope** | Forces every table to a conscious classification; no silent behaviour. |
 | 8 | Engine runtime | **Python orchestrator generating in-DB SQL** | Config parsing, topological sort, cycle detection and validation in Python; heavy data work as set-based `MERGE` executed via `python-oracledb`. |
 | 9 | Snapshot consistency | **Flashback SCN** (`expdp FLASHBACK_SCN`) | One consistent SCN across all tables; no production downtime. Requires adequate UNDO retention. |
 | 10 | Safety | **Dry-run then apply, single transaction** | Per-table insert/update/preserved counts logged before the MERGE; the whole run commits or rolls back atomically. |
@@ -152,8 +151,8 @@ tables:
 
 See `examples/sample_resync.yaml` for the full worked example.
 
-Fields per table: `mode` (natural | value | hash | reload | out_of_scope), `identity`
-(column list), `hash_exclude`, and any manually declared foreign-key edges not enforced by a
+Fields per table: `mode` (natural | value | out_of_scope), `identity`
+(column list), and any manually declared foreign-key edges not enforced by a
 constraint.
 
 ### Algorithm per table (parent-first)
@@ -162,7 +161,7 @@ constraint.
 > config routes to one of these SQL shapes.
 
 1. **Resolve foreign keys.** For each FK column, look up the parent's id-map to translate the
-   staged source key into the target key. Value-Object and hash identities that reference a
+   staged source key into the target key. Value-Object identities that reference a
    parent use the parent's *natural* key.
 2. **Match.** Join staging to the live target table on natural identity. Matched pairs seed the
    id-map (`source key → existing target key`).
@@ -176,8 +175,7 @@ constraint.
    identity is absent from Source. Children under target-only parents are never in the id-map, so
    their subtree is preserved. Oracle `MERGE` cannot delete not-matched-by-source rows, so this is
    a separate statement.
-5. `reload` tables skip matching: `TRUNCATE` then insert all staged rows with remapped FKs.
-6. **Deferred FK second pass** (nullable cycles / self-references): FK columns dropped to break
+5. **Deferred FK second pass** (nullable cycles / self-references): FK columns dropped to break
    a cycle are inserted `NULL`, then set by a `MERGE` after every table is loaded, so both
    endpoints exist.
 
@@ -224,7 +222,7 @@ To apply to a real schema:
 3. Environment-specific notes (scope, real roots, load order, blockers) live in a private,
    gitignored `INSTANCE.md` — never in the public repo.
 
-**Audit-exclude set** (never in any identity, excluded from every hash): `UPDATE_ID`,
+**Audit-exclude set** (never in any identity): `UPDATE_ID`,
 `UPDATE_TMSTMP`, `INSERT_ID`, `INSERT_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags. Excluded
 from *matching* only — by default audit columns are **copied verbatim** from Source. To instead
 stamp them with the re-sync, set `audit_override` (global): a map of column to SQL expression
@@ -250,10 +248,10 @@ Implemented in [`resync_engine/`](./resync_engine):
 - `plan.py` — classify surrogate vs natural identity; propagate **surrogate lineage** so a
   surrogate value is remapped through its *origin* table's id-map wherever it reappears.
 - `sqlgen.py` — generate set-based SQL: single `MERGE` for natural/value tables, a 5-step id-map
-  sequence (create / match / allocate / insert / update) for surrogate tables, a content-hash
-  `MERGE` for hash mode, and `TRUNCATE`+reload; plus a scoped `DELETE` for owned children
-  (delete-orphan) and a deferred second-pass `MERGE` for nullable cycles/self-refs. Matching uses
-  `_expr`, written values use `_write_expr` (audit-override), kept strictly separate.
+  sequence (create / match / allocate / insert / update) for surrogate tables; plus a scoped
+  `DELETE` for owned children (delete-orphan) and a deferred second-pass `MERGE` for nullable
+  cycles/self-refs. Matching uses `_expr`, written values use `_write_expr` (audit-override),
+  kept strictly separate.
 - `runner.py` — dry-run counts, then apply all DML in one transaction; FK constraint
   disable/re-enable-with-validate; drop id-maps after.
 - `seed.py` — `seed-config`: draft a `resync.yaml` from the catalog with review markers.

@@ -46,8 +46,7 @@ def L: if (type == "array" and (.[0] | type) == "string") then .[1] else . end;
         uniq_candidate_cols: [ .value[] | select(.in_uniq and (.in_pk|not)) | .column ],
         self_referencing: false,
         # to fill in by hand, using the decision matrix:
-        identity_mode: "TODO natural|value|hash|reload|out_of_scope",
-        identity_columns: [],
-        hash_exclude: []
+        identity_mode: "TODO natural|value|out_of_scope",
+        identity_columns: []
       } ]
   }
