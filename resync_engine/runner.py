@@ -64,8 +64,6 @@ def _counts(cur, p: TablePlan, stg: str, tgt: str) -> Counts:
         to_ins = _scalar(cur, f"SELECT COUNT(*) FROM {im} WHERE IS_NEW = 1")
         total = _scalar(cur, f"SELECT COUNT(*) FROM {tgt}.{p.name}")
         return Counts(matched, to_ins, total - matched)
-    if p.mode == "reload":
-        return Counts(0, _scalar(cur, f"SELECT COUNT(*) FROM {stg}.{p.name}"), 0)
     cur.execute(sqlgen.dryrun_counts(p, stg, tgt))
     m, i, t = cur.fetchone()
     return Counts(int(m), int(i), int(t))
@@ -84,11 +82,6 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     conn.autocommit = False
     cur = conn.cursor()
-    # Deterministic rendering so hash-mode canonicalization (TO_CHAR) is stable across sessions.
-    for _stmt in ("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'",
-                  "ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF6'",
-                  "ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'"):
-        cur.execute(_stmt)
     stg, tgt = cfg.staging_schema, cfg.target_schema
     try:
         if apply:

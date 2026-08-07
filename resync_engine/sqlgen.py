@@ -34,7 +34,7 @@ def _remap_joins(p: TablePlan, stg: str, s_alias: str = "s") -> list[str]:
 
 def _expr(p: TablePlan, col: str, s_alias: str = "s") -> str:
     """Value expression for a column: remapped id-maps translate, everything else passes through.
-    Used for MATCHING (identity / hash / delete scope)."""
+    Used for MATCHING (identity / delete scope)."""
     if col in p.remaps:
         return f"im_{col}.TGT_KEY"
     return f"{s_alias}.{col}"
@@ -49,23 +49,8 @@ def _write_expr(p: TablePlan, col: str, s_alias: str = "s") -> str:
     return _expr(p, col, s_alias)
 
 
-_HASH_NULL = "~RSNULL~"  # sentinel so NULL and empty-string hash differently
-
-
-def _hash_of(p: TablePlan, cols: list[str], source_side: bool) -> str:
-    """STANDARD_HASH(SHA256) over `cols`, canonicalised. Source side remaps FK columns to target
-    surrogates (via id-map) so the hash matches the target side. Determinism relies on the session
-    NLS set by the runner (date/timestamp/number formats)."""
-    def val(c: str) -> str:
-        return _expr(p, c) if source_side else f"d.{c}"
-    parts = " || '|' || ".join(f"NVL(TO_CHAR({val(c)}), '{_HASH_NULL}')" for c in cols)
-    return f"STANDARD_HASH({parts}, 'SHA256')"
-
-
 def _match_on(p: TablePlan) -> str:
     """Condition matching a staging row (s / remapped) to a target row (d)."""
-    if p.mode == "hash":
-        return f"{_hash_of(p, p.hash_cols, False)} = {_hash_of(p, p.hash_cols, True)}"
     return " AND ".join(f"d.{c} = {_expr(p, c)}" for c in p.identity)
 
 
@@ -229,51 +214,11 @@ WHEN MATCHED THEN UPDATE SET
        {set_s}"""
 
 
-def reload_table(p: TablePlan, stg: str, tgt: str) -> list[str]:
-    joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n       ".join(f"{_write_expr(p, c)} AS {c}" for c in p.columns)
-    cols = ", ".join(p.columns)
-    return [
-        f"TRUNCATE TABLE {tgt}.{p.name}",
-        f"INSERT INTO {tgt}.{p.name} ({cols})\nSELECT {select}\nFROM {stg}.{p.name} s\n    {joins}",
-    ]
-
-
-def merge_hash(p: TablePlan, stg: str, tgt: str) -> str:
-    """MERGE keyed on a content hash, for wide value rows. Scoped to tables without a surrogate
-    and without delete_orphans."""
-    if p.surrogate:
-        raise NotImplementedError(f"{p.name}: hash mode with a surrogate key not supported; use value mode")
-    if p.delete_orphans:
-        raise NotImplementedError(f"{p.name}: hash mode with delete_orphans not supported")
-    cols = p.columns
-    joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n           ".join(f"{_write_expr(p, c)} AS {c}" for c in cols)
-    src_hash = _hash_of(p, p.hash_cols, source_side=True)
-    tgt_hash = _hash_of(p, p.hash_cols, source_side=False)
-    non_hash = [c for c in cols if c not in p.hash_cols]     # audit columns to refresh on match
-    set_clause = ",\n       ".join(f"d.{c} = x.{c}" for c in non_hash) or f"d.{cols[0]} = x.{cols[0]}"
-    insert_cols = ", ".join(cols)
-    insert_vals = ", ".join(f"x.{c}" for c in cols)
-    return f"""MERGE INTO {tgt}.{p.name} d
-USING (
-    SELECT {select},
-           {src_hash} AS RESYNC_HASH
-    FROM {stg}.{p.name} s
-    {joins}
-  ) x
-ON ({tgt_hash} = x.RESYNC_HASH)
-WHEN MATCHED THEN UPDATE SET
-       {set_clause}
-WHEN NOT MATCHED THEN INSERT ({insert_cols})
-VALUES ({insert_vals})"""
-
-
 def build_idmap(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> list[str]:
     """Statements that create and populate a surrogate table's id-map (match + allocate). Empty
     for tables without a surrogate. Run before counts and writes; `with_keys=False` marks
     unmatched rows without allocating real keys (dry-run)."""
-    if p.mode == "reload" or not p.needs_idmap:
+    if not p.needs_idmap:
         return []
     return [create_idmap(p, stg), match_surrogate(p, stg, tgt),
             allocate_surrogate(p, stg, tgt, with_keys)]
@@ -281,11 +226,7 @@ def build_idmap(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> lis
 
 def write_statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
     """Statements that mutate the target: assume any id-maps are already built."""
-    if p.mode == "reload":
-        stmts = reload_table(p, stg, tgt)
-    elif p.mode == "hash":
-        stmts = [merge_hash(p, stg, tgt)]
-    elif p.needs_idmap:
+    if p.needs_idmap:
         stmts = [insert_surrogate(p, stg, tgt), update_surrogate(p, stg, tgt)]
     else:
         stmts = [merge_natural(p, stg, tgt)]

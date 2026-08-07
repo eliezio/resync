@@ -215,47 +215,6 @@ def test_non_nullable_self_ref_raises():
         pass
 
 
-def test_hash_mode_merge():
-    from resync_engine.model import (Column, Config as Cfg, ForeignKey, Schema as Sch, Table,
-                                     TableConfig)
-    ordt = Table("ORD", [Column("ORD_ID", False, True), Column("ORD_NO", False, False)],
-                 ["ORD_ID"], [])
-    addr = Table("ADDR",
-                 [Column("ORD_ID", False, True), Column("ADDR_TYPE", False, True),
-                  Column("LINE1", False, False), Column("CITY", False, False),
-                  Column("UPDATE_ID", False, False)],
-                 ["ORD_ID", "ADDR_TYPE"],
-                 [ForeignKey("ADDR_ORD_FK", "ORD", False, [("ORD_ID", "ORD_ID")])])
-    schema = Sch({"ORD": ordt, "ADDR": addr})
-    cfg = Cfg(tables={
-        "ORD": TableConfig(mode="natural", identity=["ORD_NO"], sequence="ORD_SEQ"),
-        "ADDR": TableConfig(mode="hash"),
-    }, audit_exclude=["UPDATE_ID"], staging_schema="STG", target_schema="TGT")
-    _order, plans = build_plans(schema, cfg)
-    p = plans["ADDR"]
-    assert p.surrogate is None
-    assert "UPDATE_ID" not in p.hash_cols                # audit excluded from the hash
-    assert {"ORD_ID", "ADDR_TYPE", "LINE1", "CITY"} <= set(p.hash_cols)
-    stmt = sqlgen.statements(p, "STG", "TGT")[0]
-    assert stmt.startswith("MERGE INTO TGT.ADDR")
-    assert "STANDARD_HASH" in stmt and "'SHA256'" in stmt
-    assert "im_ORD_ID.TGT_KEY" in stmt                   # FK remapped inside the source-side hash
-    assert "d.UPDATE_ID = x.UPDATE_ID" in stmt           # audit refreshed on match
-
-
-def test_hash_mode_rejects_surrogate():
-    from resync_engine.model import (Column, Config as Cfg, Schema as Sch, Table, TableConfig)
-    t = Table("H", [Column("H_ID", False, True), Column("V", False, False)], ["H_ID"], [])
-    cfg = Cfg(tables={"H": TableConfig(mode="hash")},
-              audit_exclude=[], staging_schema="STG", target_schema="TGT")
-    _order, plans = build_plans(Sch({"H": t}), cfg)
-    try:
-        sqlgen.statements(plans["H"], "STG", "TGT")
-        assert False, "expected NotImplementedError"
-    except NotImplementedError:
-        pass
-
-
 def test_seed_config_classifies_sample():
     import yaml
     from resync_engine import seed

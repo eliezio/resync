@@ -92,9 +92,6 @@ constraint-enforced. Central artifact of the re-sync. Each table takes one **mat
 
 - **natural** — match on a real natural-key column set.
 - **value** — match on a column subset that includes a parent reference (Value Object).
-- **hash** — match on `STANDARD_HASH` over a canonicalised, audit-excluded column set;
-  encoding of Value-Object identity for wide tuples. Scoped to effectively-immutable rows.
-- **reload** — `TRUNCATE` + reload verbatim; for Source-owned tables with no Target-only rows.
 - **out_of_scope** — left untouched on the Target.
 
 ### Version ID
@@ -102,18 +99,6 @@ constraint-enforced. Central artifact of the re-sync. Each table takes one **mat
 `VERSION_ID` column — a monotonic counter **bumped in place** on every update of a row
 (optimistic-lock style, effectively an `updated_at`). Never part of natural identity; always in
 the audit-exclude set. Including it would make a row stop matching itself after any edit.
-
-### Hash-identity
-
-Synthetic identity = `STANDARD_HASH(SHA256)` over the data columns minus the surrogate key,
-audit columns (`UPDATE_ID`, `UPDATE_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags) and any
-`hash_exclude`. Each foreign key in the hash is **remapped through its parent's id-map** (surrogate
-lineage, topological order) so the source and target sides — expressed in the same target-surrogate
-terms — hash alike. Values are canonicalised before hashing (NULL sentinel; `TO_CHAR` made
-deterministic by session NLS for date/timestamp/number set by the runner). A content hash, so any
-edit to an included column changes identity — under the stateless model that leaks a stale
-duplicate, so it is used only for effectively-immutable Value rows. Scoped to tables without a
-surrogate key and without `delete_orphans`.
 
 ### Out of scope
 

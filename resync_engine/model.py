@@ -77,9 +77,8 @@ class Schema:
 
 @dataclass
 class TableConfig:
-    mode: str                       # natural | value | hash | reload | out_of_scope
+    mode: str                       # natural | value | out_of_scope
     identity: list[str] = field(default_factory=list)
-    hash_exclude: list[str] = field(default_factory=list)
     sequence: str | None = None     # target sequence for surrogate allocation
     manual_fks: list[dict] = field(default_factory=list)  # unenforced logical FKs
     delete_orphans: bool = False    # owned child: mirror Source's child set within matched parents
@@ -104,7 +103,6 @@ class Config:
             name: TableConfig(
                 mode=spec["mode"],
                 identity=list(spec.get("identity", [])),
-                hash_exclude=list(spec.get("hash_exclude", [])),
                 sequence=spec.get("sequence"),
                 manual_fks=list(spec.get("manual_fks", [])),
                 delete_orphans=bool(spec.get("delete_orphans", False)),

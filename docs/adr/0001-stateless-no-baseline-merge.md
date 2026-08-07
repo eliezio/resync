@@ -41,8 +41,8 @@ present in the current source is always preserved.
   and accumulate as stale data over successive re-syncs.
 - The definition of "target-only row" is therefore *heuristic*, not exact — it includes both
   genuinely new target rows and orphaned formerly-production rows.
-- Tables that are Source-owned and must mirror production exactly (including deletes) should use
-  `reload` mode (`TRUNCATE` + reload) instead of merge, accepting that they hold no target-only
-  rows.
+- Tables that are Source-owned and must mirror production exactly (including deletes) are not
+  covered: the merge never deletes Source-absent target rows. A dedicated `TRUNCATE`+reload path
+  was considered and dropped as unused; reintroduce it if such a table appears.
 - If stale accumulation later proves unacceptable, revisit by introducing a baseline manifest;
   this is a reversible-at-cost decision, hence recorded here.

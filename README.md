@@ -5,7 +5,7 @@ copy**: overwrite production-originated data while preserving data created on th
 last re-sync. Because surrogate keys differ per environment, this is a **merge keyed on natural
 identity**, with foreign-key remapping — not a `dump`/`import`.
 
-> **Status:** engine feature-complete — all matching modes (natural, value, hash, reload), FK
+> **Status:** engine feature-complete — natural and value matching modes, FK
 > remapping with surrogate lineage, owned-child delete-orphan, nullable-cycle null-then-update, FK
 > constraint disable/re-enable-with-validate, and per-surrogate sequence enforcement. Verified by
 > offline unit tests and an end-to-end round-trip integration test against a real Oracle
@@ -82,8 +82,6 @@ The pipeline above is the runtime sequence; this is how each table's config sele
 flowchart TD
     T["Table<br/>(reviewed config)"] --> MODE{"mode?"}
     MODE -->|out_of_scope| OOS["left untouched"]
-    MODE -->|reload| RL["TRUNCATE + reload"]
-    MODE -->|hash| HS["hash MERGE<br/>(STANDARD_HASH)"]
     MODE -->|"natural / value"| SUR{"surrogate PK?"}
     SUR -->|yes| IDM["5-step id-map<br/>create · match · allocate · insert · update"]
     SUR -->|no| MN["single MERGE<br/>update / insert / leave target-only"]
@@ -98,7 +96,7 @@ flowchart TD
     classDef fix   fill:#e67e22,stroke:#a5541a,color:#fff;
 
     class MODE,SUR dec;
-    class RL,HS,IDM,MN write;
+    class IDM,MN write;
     class OOS keep;
     class DO,DF fix;
 ```
@@ -150,7 +148,7 @@ Installed as a package the CLI is the `resync` command (equivalently `python -m 
    It seeds the confident classifications and marks judgment calls with `TODO`/`CONFIRM`
    (mutable-in-identity columns, ownership/delete policy, `manual_fks`, sequence names) — the
    generator cannot infer those. Per table pick a matching mode
-   (`natural | value | hash | reload | out_of_scope`) and its identity columns. Conventions:
+   (`natural | value | out_of_scope`) and its identity columns. Conventions:
    `*_CD` columns are natural keys; exclude `VERSION_ID`/`UPDATE_*`/`INSERT_*`/`*_IND` audit
    columns; value objects key on parent FK + discriminator (usually the composite PK); flag owned
    children `delete_orphans: true`; declare a `sequence:` per surrogate table. See
