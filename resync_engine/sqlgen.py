@@ -114,19 +114,18 @@ FROM {stg}.{p.name} s
 JOIN {tgt}.{p.name} d ON ({on})"""
 
 
-def allocate_surrogate(p: TablePlan, stg: str, tgt: str) -> str:
+def allocate_surrogate(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> str:
     im = idmap_name(stg, p.name)
-    if p.sequence:
-        newkey = f"{p.sequence}.NEXTVAL"
-        return f"""INSERT INTO {im} (SRC_KEY, TGT_KEY, IS_NEW)
-SELECT s.{p.surrogate}, {newkey}, 1
-FROM {stg}.{p.name} s
-WHERE s.{p.surrogate} NOT IN (SELECT SRC_KEY FROM {im})"""
-    # No sequence configured: allocate above the current max. WARNING: does not advance the
-    # real sequence — set `sequence:` in the config for production use.
-    base = f"(SELECT NVL(MAX({p.surrogate}), 0) FROM {tgt}.{p.name})"
+    if not with_keys:
+        newkey = "NULL"                       # dry-run: mark unmatched without burning the sequence
+    elif p.sequence:
+        newkey = f"{tgt}.{p.sequence}.NEXTVAL"
+    else:
+        # No sequence configured: allocate above the current max. WARNING: does not advance the
+        # real sequence — set `sequence:` in the config for production use.
+        newkey = f"(SELECT NVL(MAX({p.surrogate}), 0) FROM {tgt}.{p.name}) + ROWNUM"
     return f"""INSERT INTO {im} (SRC_KEY, TGT_KEY, IS_NEW)
-SELECT s.{p.surrogate}, {base} + ROWNUM, 1
+SELECT s.{p.surrogate}, {newkey}, 1
 FROM {stg}.{p.name} s
 WHERE s.{p.surrogate} NOT IN (SELECT SRC_KEY FROM {im})"""
 
@@ -270,25 +269,34 @@ WHEN NOT MATCHED THEN INSERT ({insert_cols})
 VALUES ({insert_vals})"""
 
 
-def statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
-    """Ordered DML for one table."""
+def build_idmap(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> list[str]:
+    """Statements that create and populate a surrogate table's id-map (match + allocate). Empty
+    for tables without a surrogate. Run before counts and writes; `with_keys=False` marks
+    unmatched rows without allocating real keys (dry-run)."""
+    if p.mode == "reload" or not p.needs_idmap:
+        return []
+    return [create_idmap(p, stg), match_surrogate(p, stg, tgt),
+            allocate_surrogate(p, stg, tgt, with_keys)]
+
+
+def write_statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
+    """Statements that mutate the target: assume any id-maps are already built."""
     if p.mode == "reload":
-        return reload_table(p, stg, tgt)
-    if p.mode == "hash":
-        return [merge_hash(p, stg, tgt)]
-    if p.needs_idmap:
-        stmts = [
-            create_idmap(p, stg),
-            match_surrogate(p, stg, tgt),
-            allocate_surrogate(p, stg, tgt),
-            insert_surrogate(p, stg, tgt),
-            update_surrogate(p, stg, tgt),
-        ]
+        stmts = reload_table(p, stg, tgt)
+    elif p.mode == "hash":
+        stmts = [merge_hash(p, stg, tgt)]
+    elif p.needs_idmap:
+        stmts = [insert_surrogate(p, stg, tgt), update_surrogate(p, stg, tgt)]
     else:
         stmts = [merge_natural(p, stg, tgt)]
     if p.delete_orphans:
         stmts.append(delete_orphans(p, stg, tgt))
     return stmts
+
+
+def statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
+    """Full ordered DML for one table (id-map build + writes) — used by the offline SQL preview."""
+    return build_idmap(p, stg, tgt) + write_statements(p, stg, tgt)
 
 
 def dryrun_counts(p: TablePlan, stg: str, tgt: str) -> str:

@@ -50,8 +50,23 @@ def print_sql(catalog_path: str, config_path: str) -> str:
     return "\n".join(out)
 
 
-def _fetch_counts(cur, p: TablePlan, cfg: Config) -> Counts:
-    cur.execute(sqlgen.dryrun_counts(p, cfg.staging_schema, cfg.target_schema))
+def _scalar(cur, sql: str) -> int:
+    cur.execute(sql)
+    return int(cur.fetchone()[0])
+
+
+def _counts(cur, p: TablePlan, stg: str, tgt: str) -> Counts:
+    """Counts assume any id-maps are already built (runner phase A).
+    Surrogate tables read their id-map directly; others fall back to the dry-run count query."""
+    if p.needs_idmap:
+        im = sqlgen.idmap_name(stg, p.name)
+        matched = _scalar(cur, f"SELECT COUNT(*) FROM {im} WHERE IS_NEW = 0")
+        to_ins = _scalar(cur, f"SELECT COUNT(*) FROM {im} WHERE IS_NEW = 1")
+        total = _scalar(cur, f"SELECT COUNT(*) FROM {tgt}.{p.name}")
+        return Counts(matched, to_ins, total - matched)
+    if p.mode == "reload":
+        return Counts(0, _scalar(cur, f"SELECT COUNT(*) FROM {stg}.{p.name}"), 0)
+    cur.execute(sqlgen.dryrun_counts(p, stg, tgt))
     m, i, t = cur.fetchone()
     return Counts(int(m), int(i), int(t))
 
@@ -74,35 +89,43 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
                   "ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF6'",
                   "ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'"):
         cur.execute(_stmt)
+    stg, tgt = cfg.staging_schema, cfg.target_schema
     try:
+        if apply:
+            unseq = unsequenced_surrogates(order, plans)
+            if unseq and not allow_unsequenced:
+                raise SystemExit(
+                    "refusing to apply: surrogate tables without a configured sequence "
+                    f"{unseq}. Set `sequence:` for each (they allocate keys via NEXTVAL, which keeps "
+                    "the sequence ahead of the data so application inserts never collide). Re-run "
+                    "with allow_unsequenced=True only for a throwaway/dev target.")
+
+        # Phase A — build id-maps (match + allocate). Required by the counts and the writes, since
+        # a child's SQL joins its parents' id-maps. Keys are allocated only when applying.
+        for name in order:
+            for stmt in sqlgen.build_idmap(plans[name], stg, tgt, with_keys=apply):
+                cur.execute(stmt)
+
+        # Phase B — report counts (id-maps now exist).
         print(f"{'TABLE':40} {'matched':>9} {'insert':>9} {'tgt-only':>9}")
         for name in order:
-            c = _fetch_counts(cur, plans[name], cfg)
+            c = _counts(cur, plans[name], stg, tgt)
             print(f"{name:40} {c.matched:>9} {c.to_insert:>9} {c.target_only:>9}")
 
         if not apply:
+            conn.rollback()                      # discard the id-map population; nothing else touched
             print("\ndry-run only; no changes made.")
             return
 
-        unseq = unsequenced_surrogates(order, plans)
-        if unseq and not allow_unsequenced:
-            raise SystemExit(
-                "refusing to apply: surrogate tables without a configured sequence "
-                f"{unseq}. Set `sequence:` for each (they allocate keys via NEXTVAL, which keeps "
-                "the sequence ahead of the data so application inserts never collide). Re-run with "
-                "allow_unsequenced=True only for a throwaway/dev target.")
-
-        tgt = cfg.target_schema
         ch = cfg.constraint_handling
         cons = fk_constraints(schema, order)
 
-        # Loosen referential integrity for the load.
-        #   defer   — SET CONSTRAINTS ALL DEFERRED: transactional, validated at COMMIT (requires
-        #             the FK constraints to be DEFERRABLE). The whole run is then atomic.
-        #   disable — ALTER ... DISABLE CONSTRAINT: DDL, so each is an implicit COMMIT. The merge
-        #             itself is one transaction between the DDL bookends; full-run atomicity relies
-        #             on the pre-run target backup (see the runbook). Re-enabled WITH VALIDATE so a
-        #             residual violation aborts.
+        # Loosen referential integrity for the writes.
+        #   defer   — SET CONSTRAINTS ALL DEFERRED: transactional, validated at COMMIT (needs
+        #             DEFERRABLE constraints). The whole run is then atomic.
+        #   disable — ALTER ... DISABLE CONSTRAINT: DDL (implicit COMMIT). The writes are one
+        #             transaction between the DDL bookends; full-run atomicity relies on the pre-run
+        #             backup. Re-enabled WITH VALIDATE so a residual violation aborts.
         #   none    — leave constraints as-is (topological order already satisfies them for a DAG).
         if ch == "defer":
             cur.execute("SET CONSTRAINTS ALL DEFERRED")
@@ -110,13 +133,13 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
             for t, c in cons:
                 cur.execute(sqlgen.disable_constraint(tgt, t, c))
 
-        # --- the merge: one transaction ---
+        # Phase C — writes.
         for name in order:
-            for stmt in sqlgen.statements(plans[name], cfg.staging_schema, tgt):
+            for stmt in sqlgen.write_statements(plans[name], stg, tgt):
                 cur.execute(stmt)
-        # second pass: fix FK columns that were nulled to break a nullable cycle/self-reference
+        # second pass: fix FK columns nulled to break a nullable cycle/self-reference
         for name in order:
-            du = sqlgen.deferred_update(plans[name], cfg.staging_schema, tgt)
+            du = sqlgen.deferred_update(plans[name], stg, tgt)
             if du:
                 cur.execute(du)
 
