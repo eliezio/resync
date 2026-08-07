@@ -39,9 +39,12 @@ PWD = "resync_test_pw1"
 
 def _from_container():
     try:
-        from testcontainers.oracle import OracleDbContainer
+        from testcontainers.community.oracle import OracleDbContainer
     except Exception:
-        pytest.skip("no RESYNC_TEST_* env and testcontainers not installed")
+        try:
+            from testcontainers.oracle import OracleDbContainer
+        except Exception:
+            pytest.skip("no RESYNC_TEST_* env and testcontainers not installed")
     try:
         c = OracleDbContainer("gvenzl/oracle-free:slim-faststart")
         c.start()
