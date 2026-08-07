@@ -5,11 +5,11 @@ copy**: overwrite production-originated data while preserving data created on th
 last re-sync. Because surrogate keys differ per environment, this is a **merge keyed on natural
 identity**, with foreign-key remapping — not a `dump`/`import`.
 
-> **Status:** engine feature-complete and unit-tested offline — all matching modes (natural,
-> value, hash, reload), FK remapping with surrogate lineage, owned-child delete-orphan, nullable-
-> cycle null-then-update, FK constraint disable/re-enable-with-validate, and per-surrogate sequence
-> enforcement. SQL is generated and verified offline; end-to-end execution against a live Oracle is
-> wired but not yet integration-tested (issue #4).
+> **Status:** engine feature-complete — all matching modes (natural, value, hash, reload), FK
+> remapping with surrogate lineage, owned-child delete-orphan, nullable-cycle null-then-update, FK
+> constraint disable/re-enable-with-validate, and per-surrogate sequence enforcement. Verified by
+> offline unit tests and an end-to-end round-trip integration test against a real Oracle
+> (testcontainers / `gvenzl/oracle-free`).
 
 ## Why not just copy?
 
