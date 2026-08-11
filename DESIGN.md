@@ -245,7 +245,13 @@ a surrogate primary key, the id-map appears, and it is what every child remaps t
 
 ![natural identity with a surrogate primary key](docs/diagrams/mode-surrogate.svg)
 
-![mode: value](docs/diagrams/mode-value.svg)
+![identity relative to a parent, declared mode: value](docs/diagrams/mode-value.svg)
+
+Read that last diagram carefully: nothing in it is caused by `mode: value`. `ORDER_LINE`'s PK is
+`[ORDER_ID, LINE_NO]`, which is also its declared identity, so it has no surrogate and the engine
+emits the same single `MERGE` it would for `natural`. The `501 → 7001` translation comes from
+`ORDER_ID` being a surrogate FK with lineage into `SALES_ORDER` — a `natural` table whose identity
+contained a surrogate FK would remap identically.
 
 The two are byte-identical in the engine — nothing reads `mode == "natural"` or `mode == "value"`.
 `value` exists as a **reviewer signal**: it records that the identity is only meaningful relative to
