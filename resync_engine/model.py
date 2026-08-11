@@ -39,12 +39,6 @@ class Table:
         """Real, insertable columns (hidden virtual columns removed)."""
         return [c.name for c in self.columns if not c.name.startswith(HIDDEN_PREFIX)]
 
-    def is_nullable(self, col: str) -> bool:
-        for c in self.columns:
-            if c.name == col:
-                return c.nullable
-        return True
-
 
 @dataclass
 class Schema:

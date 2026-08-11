@@ -6,7 +6,7 @@ last re-sync. Because surrogate keys differ per environment, this is a **merge k
 identity**, with foreign-key remapping — not a `dump`/`import`.
 
 > **Status:** engine feature-complete — all matching modes (natural, value, hash), FK
-> remapping with surrogate lineage, owned-child delete-orphan, nullable-cycle null-then-update, FK
+> remapping with surrogate lineage, owned-child delete-orphan, FK
 > constraint disable/re-enable-with-validate, and per-surrogate sequence enforcement. Verified by
 > offline unit tests and an end-to-end round-trip integration test against a real Oracle
 > (testcontainers / `gvenzl/oracle-free`).
@@ -40,7 +40,7 @@ verify referential integrity | preserve target-only data | idempotent
 flowchart TD
     SRC[("Production<br/>(read-only)")] -->|"expdp FLASHBACK_SCN"| DUMP["dump file"]
     DUMP -->|"impdp"| STG[("Staging schema<br/>source keys intact")]
-    STG --> ORDER["Topological order<br/>(fail on non-nullable cycle)"]
+    STG --> ORDER["Topological order<br/>(fail on any cycle)"]
     ORDER --> MATCH["Match rows on<br/>natural identity"]
     MATCH --> IDMAP[["id-map<br/>source key to target key"]]
     IDMAP --> REMAP["Remap FK columns<br/>via id-maps (surrogate lineage)"]
@@ -50,8 +50,7 @@ flowchart TD
     MRG -->|"target-only"| KEEP["leave untouched<br/>(preserved)"]
     UPD --> ORPH["Owned child:<br/>delete orphans in matched parent"]
     INS --> ORPH
-    ORPH --> DEF["Deferred 2nd pass<br/>(nullable cycle / self-ref)"]
-    DEF --> VER["Re-enable constraints VALIDATE<br/>dry-run counts · idempotent"]
+    ORPH --> VER["Re-enable constraints VALIDATE<br/>dry-run counts · idempotent"]
     VER --> CLEAN["Drop staging + id-maps"]
 
     classDef src   fill:#e05a5a,stroke:#8b1a1a,color:#fff;
@@ -69,7 +68,7 @@ flowchart TD
     class MRG dec;
     class UPD,INS write;
     class KEEP keep;
-    class ORPH,DEF fix;
+    class ORPH fix;
     class VER,CLEAN done;
 ```
 
@@ -89,7 +88,6 @@ flowchart TD
 
     IDM -.->|delete_orphans| DO["＋ scoped DELETE<br/>(owned child)"]
     MN  -.->|delete_orphans| DO
-    IDM -.->|"nullable cycle / self-ref"| DF["＋ deferred 2nd-pass MERGE"]
 
     classDef dec   fill:#9b59b6,stroke:#5e356e,color:#fff;
     classDef write fill:#5cb85c,stroke:#2d6a2d,color:#fff;
@@ -99,7 +97,7 @@ flowchart TD
     class MODE,SUR dec;
     class HS,IDM,MN write;
     class OOS keep;
-    class DO,DF fix;
+    class DO fix;
 ```
 
 See [DESIGN.md](DESIGN.md) for the full strategy, decisions, and runbook, and

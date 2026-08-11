@@ -31,7 +31,7 @@ parent-first in topological order.
 - **No PII masking** (lower envs cleared for verbatim prod data).
 - Topology B: staging schema on target, Data Pump file handoff, set-based `MERGE` in-database.
 - Engine is Python generating in-DB SQL. Snapshot via Flashback SCN. Dry-run then atomic apply.
-- Cycles: detect always, fail loud; null-then-update only for nullable back-edges.
+- Cycles: detect always, fail loud. The entity graph must be a DAG with no self-references.
 
 ## Conventions
 

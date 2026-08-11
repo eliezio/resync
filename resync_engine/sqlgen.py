@@ -84,14 +84,13 @@ def merge_natural(p: TablePlan, stg: str, tgt: str) -> str:
     """Single MERGE for a table without a surrogate (natural or value identity)."""
     cols = p.columns
     joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n           ".join(
-        (f"NULL AS {c}" if c in p.deferred_cols else f"{_write_expr(p, c)} AS {c}") for c in cols)
+    select = ",\n           ".join(f"{_write_expr(p, c)} AS {c}" for c in cols)
     src = f"""(
     SELECT {select}
     FROM {stg}.{p.name} s
     {joins}
   )"""
-    non_ident = [c for c in cols if c not in p.identity and c not in p.deferred_cols]
+    non_ident = [c for c in cols if c not in p.identity]
     set_clause = ",\n       ".join(f"d.{c} = x.{c}" for c in non_ident) or "d.{0} = x.{0}".format(cols[0])
     insert_cols = ", ".join(cols)
     insert_vals = ", ".join(f"x.{c}" for c in cols)
@@ -133,14 +132,7 @@ WHERE s.{p.surrogate} NOT IN (SELECT SRC_KEY FROM {im})"""
 def insert_surrogate(p: TablePlan, stg: str, tgt: str) -> str:
     im = idmap_name(stg, p.name)
     joins = "\n    ".join(_remap_joins(p, stg))
-    exprs = []
-    for c in p.columns:
-        if c == p.surrogate:
-            exprs.append("m.TGT_KEY")
-        elif c in p.deferred_cols:
-            exprs.append("NULL")                 # set in a second pass (broken nullable cycle)
-        else:
-            exprs.append(_write_expr(p, c))
+    exprs = ["m.TGT_KEY" if c == p.surrogate else _write_expr(p, c) for c in p.columns]
     select = ",\n       ".join(f"{e} AS {c}" for e, c in zip(exprs, p.columns))
     cols = ", ".join(p.columns)
     return f"""INSERT INTO {tgt}.{p.name} ({cols})
@@ -153,7 +145,7 @@ JOIN {im} m ON m.SRC_KEY = s.{p.surrogate} AND m.IS_NEW = 1
 def update_surrogate(p: TablePlan, stg: str, tgt: str) -> str:
     im = idmap_name(stg, p.name)
     joins = "\n    ".join(_remap_joins(p, stg))
-    non_sur = [c for c in p.columns if c != p.surrogate and c not in p.deferred_cols]
+    non_sur = [c for c in p.columns if c != p.surrogate]
     select = ",\n           ".join(f"{_write_expr(p, c)} AS {c}" for c in non_sur)
     set_clause = ",\n       ".join(f"d.{c} = x.{c}" for c in non_sur)
     return f"""MERGE INTO {tgt}.{p.name} d
@@ -194,39 +186,6 @@ WHERE {scope}
     SELECT 1 FROM {stg}.{p.name} s
     {joins}
     WHERE {on})"""
-
-
-def deferred_update(p: TablePlan, stg: str, tgt: str) -> str | None:
-    """Second pass: set the FK columns that were nulled to break a nullable cycle/self-reference.
-    Runs after every table is loaded, so both endpoints of the deferred edge exist. Requires the
-    table to have its own id-map (its surrogate) to locate the target rows."""
-    if not p.deferred_cols:
-        return None
-    if not p.needs_idmap:
-        raise NotImplementedError(
-            f"{p.name}: deferred FK fixup needs a surrogate id-map (only self-refs / surrogate "
-            "tables are supported)")
-    im = idmap_name(stg, p.name)
-    joins, sel, setc = [], [], []
-    for c in p.deferred_cols:
-        a = f"im_{c}"
-        joins.append(f"LEFT JOIN {idmap_name(stg, p.remaps[c])} {a} ON {a}.SRC_KEY = s.{c}")
-        sel.append(f"{a}.TGT_KEY AS {c}")
-        setc.append(f"d.{c} = x.{c}")
-    joins_s = "\n    ".join(joins)
-    sel_s = ",\n           ".join(sel)
-    set_s = ",\n       ".join(setc)
-    return f"""MERGE INTO {tgt}.{p.name} d
-USING (
-    SELECT m.TGT_KEY AS {p.surrogate},
-           {sel_s}
-    FROM {stg}.{p.name} s
-    JOIN {im} m ON m.SRC_KEY = s.{p.surrogate}
-    {joins_s}
-  ) x
-ON (d.{p.surrogate} = x.{p.surrogate})
-WHEN MATCHED THEN UPDATE SET
-       {set_s}"""
 
 
 def merge_hash(p: TablePlan, stg: str, tgt: str) -> str:

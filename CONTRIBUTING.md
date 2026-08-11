@@ -57,9 +57,9 @@ Order/OrderLine sample for anything public.
 `resync_engine/`:
 
 - `model.py` — load the catalog (`config.skeleton.json`) and the config (`resync.yaml`).
-- `graph.py` — topological sort; breaks nullable cycles, fails loud on non-nullable ones.
-- `plan.py` — per-table plan: surrogate detection, FK-remap lineage, deferred columns, hash set.
-- `sqlgen.py` — generate the set-based SQL (`MERGE`, id-map steps, delete-orphan, hash, deferred).
+- `graph.py` — topological sort, parents first; fails loud on any cycle or self-reference.
+- `plan.py` — per-table plan: surrogate detection, FK-remap lineage, hash set.
+- `sqlgen.py` — generate the set-based SQL (`MERGE`, id-map steps, delete-orphan, hash).
 - `runner.py` — dry-run counts, apply in a transaction, constraint handling.
 - `seed.py` — `seed-config`: draft a `resync.yaml` from the catalog.
 - `cli.py` — the `resync` command.

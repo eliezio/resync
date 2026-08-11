@@ -40,13 +40,6 @@ def print_sql(catalog_path: str, config_path: str) -> str:
             out.append(f"-- BLOCKED: unresolved surrogate columns {p.unresolved} — see resync.yaml")
         for stmt in sqlgen.statements(p, cfg.staging_schema, cfg.target_schema):
             out.append(stmt + ";\n")
-    deferred = [n for n in order if plans[n].deferred_cols]
-    if deferred:
-        out.append("-- ===== deferred FK second pass (broken nullable cycles / self-refs) =====")
-        for name in deferred:
-            du = sqlgen.deferred_update(plans[name], cfg.staging_schema, cfg.target_schema)
-            if du:
-                out.append(du + ";\n")
     return "\n".join(out)
 
 
@@ -135,12 +128,6 @@ def run(catalog_path: str, config_path: str, dsn: str, user: str, password: str,
         for name in order:
             for stmt in sqlgen.write_statements(plans[name], stg, tgt):
                 cur.execute(stmt)
-        # second pass: fix FK columns nulled to break a nullable cycle/self-reference
-        for name in order:
-            du = sqlgen.deferred_update(plans[name], stg, tgt)
-            if du:
-                cur.execute(du)
-
         conn.commit()  # for defer, this is where deferred constraints validate (violation -> error)
 
         if ch == "disable":
