@@ -29,25 +29,58 @@ target-created data makes it a merge rather than a load.
 **Three invariants** everything rests on:
 
 1. **Every row has a stable, environment-portable identity** — a natural key, not the surrogate.
-   A table that cannot state one cannot be merged; it can only be reloaded or skipped.
-2. **A surrogate value identifies the same row across environments only through a mapping.** Build
-   a `source → target` id-map per entity by matching on natural identity, and translate every
-   foreign key through it.
+   Stable means *invariant under the edits the source makes to that row*: identity must survive a
+   change to the row's other columns, or the same logical row will be matched as two.
+   A table that cannot state such a key has two fallbacks, both lossy: match on the whole row
+   content (`hash`, correct only while the rows are genuinely immutable — a mutation there breaks
+   this invariant and duplicates the row), or leave it out of scope.
+2. **A surrogate value identifies the same row across environments only through a mapping.** Where
+   a table has a surrogate, build a `source → target` id-map for it by matching on natural
+   identity, and translate the columns carrying that surrogate through the map. Only surrogates
+   need this: a table whose identity *is* its key gets no id-map, and a foreign key onto a natural
+   key (a code column) is portable as-is and is copied verbatim. What must be remapped is decided
+   by where a value **originates**, not by which table the local foreign key points at — a
+   surrogate minted in one table is translated through *that* table's map everywhere it reappears.
 3. **Identity resolves bottom-up.** A child's identity may depend on its parent's, so identities —
-   and therefore the whole merge — are computed **parent-first**. That requires an acyclic entity
-   graph.
+   and therefore the whole merge — are computed **parent-first**. That needs an ordering, which a
+   cyclic graph denies. A cycle is therefore fatal — the engine refuses rather than guessing an
+   order (decision 5).
 
-**Generic algorithm** (any schema satisfying the invariants):
+**Assumed schema shape.** Two structural assumptions are load-bearing and are *not* fully enforced.
+Both hold for the schema in scope; re-check them after any schema drift.
+
+- **The entity graph is a DAG, with no self-references.** Ordering is what makes parent-first
+  resolution possible, and a cycle denies it. This one *is* enforced: any cycle raises `CycleError`
+  and the run refuses to start, self-references included, nullable or not. There is no partial
+  support to fall back on — see decision 5 for why the nullable-back-edge workaround was removed.
+- **No many-to-many relationship between two surrogate-keyed parents.** A junction table is
+  supported, and merges correctly, when it links a surrogate parent to a code or discriminator —
+  that is a Value Object with one owner, and every junction table in scope has this shape
+  (`{parent surrogate} + {*_CD}`). What is *not* modelled is a link table whose identity carries
+  two or more surrogates. Such a table still matches correctly, because each surrogate is remapped
+  through its own id-map, but ownership becomes ambiguous: `delete_orphans` has no notion of a
+  primary owner and scopes the delete to rows where **every** remapped identity column resolves to
+  a source-matched parent. The delete then means "both endpoints came from Source", not "this
+  aggregate root owns this row" — a link pointing at one target-created endpoint survives even
+  when Source is authoritative for the other. Nothing warns about this. If a true many-to-many
+  enters scope, either leave `delete_orphans` off or teach the config to name the owning FK.
+
+**Generic algorithm** (any schema satisfying the invariants and the assumptions above):
 
 ```
 extract a consistent source snapshot into staging (source keys intact)
-topologically order the entities (fail on cycle)
+topologically order the entities (fail on any cycle)
 for each entity, parents-first:
-    match staging rows to target rows on natural identity  -> id-map
-    remap FK columns through parents' id-maps
-    MERGE: update matched · insert unmatched (new target keys) · leave target-only
+    remap the columns carrying a parent surrogate, through that parent's id-map
+    if the entity has a surrogate of its own:
+        match on natural identity -> id-map, minting target keys for the unmatched
+    MERGE: update matched · insert unmatched (fresh surrogate where it has one) · leave target-only
+    if the entity is an owned child: delete target children absent from a matched parent
 verify referential integrity · preserve target-only rows · confirm idempotent
 ```
+
+The id-map step is conditional: an entity keyed on its own natural identity is merged directly and
+never needs one. Only a surrogate has to be translated, and only because its children reference it.
 
 **Deliberate scoping choices** — each trades completeness for simplicity and is tunable per
 project (the specifics chosen here are in the decisions table below):
@@ -57,8 +90,7 @@ project (the specifics chosen here are in the decisions table below):
   children mirrored, orphans deleted; target-only root → whole subtree preserved).
 - **Stateless** (no baseline) — no source-delete propagation; stale rows tolerated.
 - A **reviewed identity config** is the source of truth — automation seeds it, humans finish it.
-- Per-table **escape hatches**: reload (source-owned, exact mirror), hash (wide immutable value
-  rows), out-of-scope.
+- Per-table **escape hatches**: hash (wide immutable value rows), out-of-scope.
 
 **Why bespoke.** No off-the-shelf tool does natural-key matching, FK remapping, and target-row
 preservation together; commodity tools cover only the edges (schema extraction, data transport).
@@ -81,12 +113,12 @@ match** — those are the preserved target-only rows.
 | 2 | Handle rows deleted on source | **Stateless, no baseline** | No cross-run state. Source-deleted rows are indistinguishable from new target rows and are kept (stale accumulation accepted). See ADR-0001. |
 | 3 | Source of natural identity | **Reviewed config, seeded from constraints** | Natural keys are frequently not constraint-enforced in this schema; a reviewed file is the only trustworthy source. `*_CD` columns default to identity by convention. |
 | 4 | PII masking | **None** | Lower environments cleared to hold verbatim production data. (Compliance risk flagged and accepted.) |
-| 5 | Cycles | **Detect always; null-then-update for nullable back-edges; fail loud otherwise** | Implemented: `graph.load_order` breaks a nullable back-edge (or nullable self-reference), records it as *deferred*; the deferred FK column is inserted `NULL` and set in a second-pass `MERGE` (`sqlgen.deferred_update`) after all rows exist. Non-nullable cycles raise `CycleError`. The current schema is acyclic, but this guards against drift. |
+| 5 | Cycles | **Detect always; fail loud. The graph must be a DAG with no self-references** | `graph.load_order` raises `CycleError` on any cycle, including a self-reference (a length-1 cycle), regardless of FK nullability. An earlier version broke nullable back-edges — inserting the column `NULL` and filling it in on a second-pass `MERGE` — and that was removed on 2026-08-11: no schema in scope has a cycle, the fixup only worked for tables carrying their own surrogate id-map, and a topology supported halfway is worse than one refused outright. A cycle is now a drift alarm; handling it is a deliberate design change, not a config edit. |
 | 6 | Execution topology | **Staging schema on target; Data Pump file handoff; local set-based MERGE** | Merge logic runs in-DB (fast, transactional); production is read-only; a dump-file handoff needs no live network path from a lower environment into production. |
-| 7 | Identity-less tables | **Per-table mode: natural / value / hash / reload / out_of_scope** | Forces every table to a conscious classification; no silent behaviour. |
+| 7 | Identity-less tables | **Per-table mode: natural / value / hash / out_of_scope** | Forces every table to a conscious classification; no silent behaviour. `natural` and `value` generate identical SQL — the distinction is a reviewer signal, not a code path (see [Modes](#modes)). |
 | 8 | Engine runtime | **Python orchestrator generating in-DB SQL** | Config parsing, topological sort, cycle detection and validation in Python; heavy data work as set-based `MERGE` executed via `python-oracledb`. |
 | 9 | Snapshot consistency | **Flashback SCN** (`expdp FLASHBACK_SCN`) | One consistent SCN across all tables; no production downtime. Requires adequate UNDO retention. |
-| 10 | Safety | **Dry-run then apply, single transaction** | Per-table insert/update/preserved counts logged before the MERGE; the whole run commits or rolls back atomically. |
+| 10 | Safety | **Dry-run then apply, single transaction** | Per-table insert/update/preserved counts logged before the MERGE; the whole run commits or rolls back atomically. One exception: `constraint_handling: disable` issues DDL, whose implicit `COMMIT` splits the run (see below). Under `defer` or `none` the run is genuinely one transaction — the engine emits no DDL of its own. |
 | 11 | Config format | **YAML** | Human-reviewed, comments document why each identity was chosen. |
 | 12 | Owned children | **Scoped delete-orphan** | An owned Value Object (e.g. `*_DTL`, `*_LABEL`) follows its aggregate root: within a Source-matched parent the Source child set is authoritative, so Target children absent from Source are deleted. Children under target-only parents are preserved. Refines decision 1: "preserve target-only" applies at the aggregate-root grain. |
 
@@ -152,9 +184,95 @@ tables:
 
 See `examples/sample_resync.yaml` for the full worked example.
 
-Fields per table: `mode` (natural | value | hash | reload | out_of_scope), `identity`
-(column list), `hash_exclude`, and any manually declared foreign-key edges not enforced by a
-constraint.
+#### Config reference
+
+Global keys (`resync_engine/model.py:Config`):
+
+| Key | Required | Default | Meaning |
+|-----|----------|---------|---------|
+| `staging_schema` | yes | — | Schema holding the imported source rows; also where id-map tables are created and dropped. |
+| `target_schema` | yes | — | Schema being merged into. |
+| `audit_exclude` | no | `[]` | Columns excluded from every content hash. **Exact names only — no globbing.** |
+| `constraint_handling` | no | `disable` | `disable` \| `defer` \| `none` (see below). |
+| `audit_override` | no | `{}` | Column → SQL expression written on insert/update instead of the source value. Never affects matching. |
+
+Per-table keys (`resync_engine/model.py:TableConfig`):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `mode` | required | `natural` \| `value` \| `hash` \| `out_of_scope`. Any other value is rejected at load. |
+| `identity` | `[]` | Natural-identity columns. Not used for matching under `hash`, but still read to decide whether the PK is a surrogate. |
+| `hash_exclude` | `[]` | Extra columns kept out of the hash (`hash` mode only). |
+| `sequence` | `null` | Target sequence used to allocate keys for a surrogate table. |
+| `delete_orphans` | `false` | Owned child: mirror Source's child set within Source-matched parents. |
+| `manual_fks` | `[]` | Logical foreign keys with no database constraint, e.g. `- {parent: CURRENCY, columns: ["CCY_CD->CURRENCY_CD"]}`. |
+
+### Modes
+
+`mode` does not by itself select the generated SQL. The router is:
+
+```
+mode == out_of_scope        -> table excluded from the run entirely
+mode == hash                -> content-hash MERGE
+otherwise (natural | value) -> surrogate present ? 5-step id-map sequence : single MERGE
+```
+
+"Surrogate present" is *inferred*, not declared: a single-column primary key that is not part of
+the declared `identity` (`plan.py:_surrogate_of`). A table declared `natural` with a surrogate PK
+takes the id-map path; the same table with its PK declared as the identity takes the single MERGE.
+
+| Mode | Generated SQL | Preserves target-only rows | Can parent a remapped child | Restrictions |
+|------|---------------|----------------------------|-----------------------------|--------------|
+| `natural` | single `MERGE`, or the 5-step id-map sequence if a surrogate is present | yes | only via a surrogate | — |
+| `value` | *identical to* `natural` | yes | only via a surrogate | — |
+| `hash` | `MERGE` keyed on `STANDARD_HASH` | yes | no (id-map is never built) | rejects a surrogate PK; rejects `delete_orphans` |
+| `out_of_scope` | none | n/a — untouched | no | in-scope FKs pointing at it are **not** remapped |
+
+Every mode preserves target-only rows: the engine never removes a target row except through the
+parent-scoped `delete_orphans` DELETE. There is deliberately no whole-table mirror mode — see
+[ADR-0001](docs/adr/0001-stateless-no-baseline-merge.md) for why `reload` was removed.
+
+#### natural vs value
+
+The two are byte-identical in the engine — nothing reads `mode == "natural"` or `mode == "value"`.
+`value` exists as a **reviewer signal**: it records that the identity is only meaningful relative to
+a parent (parent FK + discriminator), which is what makes `delete_orphans` sensible and what warns
+a reviewer that the identity cannot be checked in isolation. Keep the distinction in the config for
+that reason; do not expect a behavioural difference.
+
+#### hash
+
+For wide value rows with no usable natural key. Identity *is* the content.
+
+- **Hashed columns** = insertable columns − `audit_exclude` − `hash_exclude` − the surrogate, if any
+  (`plan.py`).
+- **Canonicalization** (`sqlgen._hash_of`): each column is `TO_CHAR`'d, `NULL` is replaced with the
+  sentinel `~RSNULL~` so `NULL` and `''` hash differently, values are joined with `'|'`, and the
+  result is `STANDARD_HASH(..., 'SHA256')`.
+- **FK columns are remapped before hashing** on the source side, so both sides of the comparison
+  carry target surrogates.
+- **Determinism depends on session NLS.** Because the canonical form is `TO_CHAR`-based, the runner
+  sets `NLS_DATE_FORMAT`, `NLS_TIMESTAMP_FORMAT` and `NLS_NUMERIC_CHARACTERS` before doing anything
+  (`runner.run`). SQL taken from `print-sql` and run by hand **must** set the same three, or matching
+  is silently wrong.
+- **Mutation is not an update.** A changed source row hashes differently, so it is inserted as a new
+  row while the old target row — unmatched — is preserved. Hash mode therefore duplicates on change:
+  use it only for rows that are genuinely immutable, and re-read [Known limitations](#known-limitations).
+- **Only non-hashed columns are updated on a match** — in practice just the audit columns and any
+  `audit_override`. Every other column is by definition already equal.
+- **Cost:** the target-side hash is computed per row per run and cannot be indexed; expect a full
+  scan of the target table.
+- Rejected combinations raise `NotImplementedError` at SQL-generation time: a surrogate PK (use
+  `value`) and `delete_orphans`.
+
+#### out_of_scope
+
+The table is dropped from the load order and never read or written. The consequence to watch: an
+**in-scope child's FK to an out-of-scope parent is not remapped** — the source (production) surrogate
+is written verbatim into the target. The BLOCKED guard catches only the narrow case of an unresolvable
+`*_ID` column that appears in the declared `identity`. Anything else is caught late, at
+`ENABLE VALIDATE`, if an enforced constraint exists — and not at all for a `manual_fks` edge. Before
+marking a table out of scope, check who references it.
 
 ### Algorithm per table (parent-first)
 
@@ -162,8 +280,13 @@ constraint.
 > config routes to one of these SQL shapes.
 
 1. **Resolve foreign keys.** For each FK column, look up the parent's id-map to translate the
-   staged source key into the target key. Value-Object and hash identities that reference a
-   parent use the parent's *natural* key.
+   staged source key into the target key. This applies to *matching* as well: a Value-Object or
+   hash identity that includes a parent FK is compared against the parent's **remapped target
+   surrogate**, not against the parent's natural key.
+   Remapping follows **surrogate lineage**, not the local FK: a surrogate value is translated
+   through the id-map of the table it *originates* in, wherever it reappears. `ORDER_LINE_ALLOC`
+   carries `ORDER_ID` and its local FK points at `ORDER_LINE`, but `ORDER_ID` is remapped through
+   `SALES_ORDER`'s id-map, because that is where the value was minted (`plan.py`).
 2. **Match.** Join staging to the live target table on natural identity. Matched pairs seed the
    id-map (`source key → existing target key`).
 3. **Merge.**
@@ -176,10 +299,15 @@ constraint.
    identity is absent from Source. Children under target-only parents are never in the id-map, so
    their subtree is preserved. Oracle `MERGE` cannot delete not-matched-by-source rows, so this is
    a separate statement.
-5. `reload` tables skip matching: `TRUNCATE` then insert all staged rows with remapped FKs.
-6. **Deferred FK second pass** (nullable cycles / self-references): FK columns dropped to break
-   a cycle are inserted `NULL`, then set by a `MERGE` after every table is loaded, so both
-   endpoints exist.
+   The owner is *inferred*, not declared: every remapped column in the identity is treated as one,
+   and the scope is their conjunction. With one surrogate in the identity — the shape of every
+   owned child in scope — that is exactly aggregate-root ownership. With two or more it silently
+   weakens to "all endpoints came from Source"; see the schema assumptions in
+   [General strategy](#general-strategy).
+
+There is no second pass. Every FK is resolvable at the point its table is processed, because the
+load order guarantees the parent is already there — which is exactly what the acyclicity assumption
+buys.
 
 **Sequences.** Each surrogate table declares its target `sequence:`. New rows allocate keys via
 `sequence.NEXTVAL`, which advances the sequence past every id the engine assigns — so keys stay
@@ -210,9 +338,10 @@ availability regardless (disabling constraints does not remove the parent-before
 
 The public repo carries a synthetic worked example (Order/OrderLine) in `examples/`:
 `sample_catalog.json` (schema in `config.skeleton.json` format) and `sample_resync.yaml`
-(the identity config). It exercises every feature — reference tables, a surrogate root with an
-in-place `VERSION_ID`, owned children with delete-orphan, surrogate-lineage remap, and
-FK-to-code. Run `python -m resync_engine.cli print-sql` to see the generated SQL.
+(the identity config). It covers the mainline merge path — reference tables, a surrogate root with
+an in-place `VERSION_ID`, owned children with delete-orphan, surrogate-lineage remap, and
+FK-to-code — using only `natural` and `value`. The escape hatches (`hash`, `out_of_scope`),
+`manual_fks` and `audit_override` are exercised in `tests/test_engine.py` rather than in the sample. Run `python -m resync_engine.cli print-sql` to see the generated SQL.
 
 To apply to a real schema:
 
@@ -224,35 +353,53 @@ To apply to a real schema:
 3. Environment-specific notes (scope, real roots, load order, blockers) live in a private,
    gitignored `INSTANCE.md` — never in the public repo.
 
-**Audit-exclude set** (never in any identity, excluded from every hash): `UPDATE_ID`,
-`UPDATE_TMSTMP`, `INSERT_ID`, `INSERT_TMSTMP`, `VERSION_ID`, `*_IND` soft-delete flags. Excluded
-from *matching* only — by default audit columns are **copied verbatim** from Source. To instead
+**Audit-exclude set**: `UPDATE_ID`, `UPDATE_TMSTMP`, `INSERT_ID`, `INSERT_TMSTMP`, `VERSION_ID`,
+and soft-delete `_IND` flags. Two caveats about how far the engine enforces this:
+
+- `audit_exclude` is consumed **only** by hash-mode column selection. "Never in any identity" is a
+  review convention — nothing rejects `VERSION_ID` in an `identity:` list.
+- The list is matched by **exact name**. There is no globbing, so a literal `*_IND` entry matches
+  nothing; enumerate the real column names. `seed-config` expands the `_IND` pattern for you when it
+  drafts the file, so seeded configs already carry the concrete names.
+
+Excluded from *matching* only — by default audit columns are **copied verbatim** from Source. To instead
 stamp them with the re-sync, set `audit_override` (global): a map of column to SQL expression
 written on insert and update, e.g. `UPDATE_ID: "'RESYNC'"`, `UPDATE_TMSTMP: "SYSTIMESTAMP"`. It
 affects written values only, never matching.
 
 ## Known limitations
 
-- **Source deletes never propagate** (stateless model) — stale rows accumulate on the target.
-  See ADR-0001.
+- **Source deletes never propagate** (stateless model) — stale rows accumulate on the target, and
+  there is no per-table opt-out: the removal of `reload` means no mode mirrors a source table
+  whole. See ADR-0001 for the two routes back if this ever bites.
 - **Hard cell:** a table that both takes target-only rows *and* mutates *and* has no natural
   key is unsolvable under the stateless model — **verify** such a table is absent before build.
 - **Logical-only relationships** (code columns not enforced by an FK) are invisible to the
   extraction; declare them by hand in the config (`manual_fks`) or the table stays BLOCKED.
+- **Hash mode duplicates on mutation** — content is the identity, so an edited source row inserts a
+  second row and the pre-edit target row survives as target-only. Only classify genuinely immutable
+  rows as `hash`.
+- **`delete_orphans` has no notion of a primary owner** — it scopes the delete by *every* remapped
+  identity column, so a table whose identity carries two surrogates deletes only where both parents
+  are source-matched. Correct for the single-owner Value Objects in scope; wrong for a true
+  many-to-many. See the schema assumptions in [General strategy](#general-strategy).
+- **FKs into out-of-scope tables are copied unmapped** — a production surrogate lands in the target.
+  Enforced constraints catch it at `ENABLE VALIDATE`; `manual_fks` edges are not caught at all.
+- **`seed-config` never proposes `hash`.** The seeder emits `natural`, `value` and `out_of_scope`
+  only; the escape hatch is always a deliberate hand edit.
 
 ## Engine
 
 Implemented in [`resync_engine/`](./resync_engine):
 
 - `model.py` — load catalog (`config.skeleton.json`) and config (`resync.yaml`).
-- `graph.py` — Kahn topological sort; breaks nullable cycles/self-refs (deferred), `CycleError`
-  on non-nullable ones.
+- `graph.py` — Kahn topological sort, parents first; `CycleError` on any cycle or self-reference.
 - `plan.py` — classify surrogate vs natural identity; propagate **surrogate lineage** so a
   surrogate value is remapped through its *origin* table's id-map wherever it reappears.
 - `sqlgen.py` — generate set-based SQL: single `MERGE` for natural/value tables, a 5-step id-map
   sequence (create / match / allocate / insert / update) for surrogate tables, a content-hash
-  `MERGE` for hash mode, and `TRUNCATE`+reload; plus a scoped `DELETE` for owned children
-  (delete-orphan) and a deferred second-pass `MERGE` for nullable cycles/self-refs. Matching uses
+  `MERGE` for hash mode; plus a scoped `DELETE` for owned children
+  (delete-orphan). Matching uses
   `_expr`, written values use `_write_expr` (audit-override), kept strictly separate.
 - `runner.py` — dry-run counts, then apply all DML in one transaction; FK constraint
   disable/re-enable-with-validate; drop id-maps after.
@@ -295,7 +442,10 @@ One re-sync run, end to end. Steps 1–5 are side-effect-free; step 6 is atomic.
 **4. Guard**
 - Snapshot the target: per-table row counts and the count of presumed target-only rows, for the
   post-run preservation check.
-- Disable or defer target foreign-key constraints.
+- Take the pre-run target backup — it is the only recovery path under
+  `constraint_handling: disable`, whose DDL commits implicitly.
+- Do **not** touch the foreign-key constraints by hand: the engine disables or defers them per
+  `constraint_handling` and re-enables them itself.
 
 **5. Dry-run**
 - `python -m resync_engine.cli run … ` (without `--apply`): per-table matched / insert /
@@ -306,9 +456,10 @@ One re-sync run, end to end. Steps 1–5 are side-effect-free; step 6 is atomic.
 **6. Apply (single transaction)**
 - Parents-first per the load order. Each table: build its id-map, remap FK columns, `MERGE`
   (update matched, insert new with fresh keys, leave target-only rows untouched).
-- Advance each surrogate sequence past `MAX(id)`.
-- Re-enable FK constraints **WITH VALIDATE** — any breakage aborts the transaction.
-- Commit, or roll the whole run back on any error.
+- Re-enable FK constraints **WITH VALIDATE** — any breakage aborts. On failure the engine
+  re-enables `NOVALIDATE` so constraints are never left disabled.
+- Commit, or roll the whole run back on any error. Sequences need no separate advance step: new
+  keys come from `NEXTVAL`, which leaves the sequence ahead of the data.
 
 **7. Verify** (see the verification section below).
 
@@ -316,9 +467,10 @@ One re-sync run, end to end. Steps 1–5 are side-effect-free; step 6 is atomic.
 - Drop the id-map tables and the `RESYNC_STG` schema.
 - Re-open the target to the application.
 
-**Rollback points:** steps 1–5 leave no trace (drop staging and stop). Step 6 is atomic —
-commit or full rollback. After a committed run, recovery is either a re-run (idempotent) or
-restoring the target from its pre-run backup.
+**Rollback points:** steps 1–5 leave no trace (drop staging and stop). Step 6 is atomic *unless*
+the run uses `constraint_handling: disable`, whose DDL bookends commit implicitly — the DML
+between them is atomic, but the run as a whole is not. After a committed run, recovery is either a
+re-run (idempotent) or restoring the target from its pre-run backup.
 
 ## Verification
 
@@ -333,4 +485,6 @@ restoring the target from its pre-run backup.
    - Insert known target-only rows; edit and delete some source rows.
    - Re-run; assert: target-only rows survive; source edits applied; every FK resolves
      (`re-enable constraint … validate` succeeds); no orphaned surrogate keys.
-4. **Idempotency:** run twice back-to-back; the second run reports 0 inserts / 0 updates.
+4. **Idempotency:** run twice back-to-back; the second run reports 0 inserts / 0 updates. One
+   exception: a mutated `hash` row inserts once (then matches on later runs) while its
+   pre-mutation target row lingers as target-only until cleared by hand.

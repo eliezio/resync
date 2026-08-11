@@ -168,8 +168,12 @@ def delete_orphans(p: TablePlan, stg: str, tgt: str) -> str:
     id-map — i.e. a Source-originated parent. Children under target-only parents are never in the
     id-map, so their subtree is untouched (preserved).
     """
-    # Scope by the *owning* FK only: a remapped column that is part of the identity. Incidental
-    # surrogate FKs (e.g. a product reference on an order line) must not narrow the delete scope.
+    # Scope by the remapped columns that are part of the identity. Incidental surrogate FKs (e.g. a
+    # product reference on an order line) are excluded, so they cannot narrow the delete scope.
+    # NOTE: with a single such column — every owned child in scope — this is aggregate-root
+    # ownership. With two or more (a link table keyed on two surrogates) there is no declared
+    # primary owner, and the conjunction below weakens the rule to "every endpoint came from
+    # Source". See the schema assumptions in DESIGN.md.
     owner = {c: o for c, o in p.remaps.items() if c in p.identity}
     if not owner:
         raise ValueError(
