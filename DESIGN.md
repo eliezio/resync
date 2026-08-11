@@ -232,7 +232,20 @@ Every mode preserves target-only rows: the engine never removes a target row exc
 parent-scoped `delete_orphans` DELETE. There is deliberately no whole-table mirror mode — see
 [ADR-0001](docs/adr/0001-stateless-no-baseline-merge.md) for why `reload` was removed.
 
+Each mode is drawn out below, one diagram per mode, in terms of what happens to a row that is
+matched, unmatched-in-source, or present only on the target.
+
 #### natural vs value
+
+![mode: natural](docs/diagrams/mode-natural.svg)
+
+A table whose identity is its own key needs no id-map — the key already means the same thing in
+both environments, so a child's foreign key onto it is copied verbatim. When the same table carries
+a surrogate primary key, the id-map appears, and it is what every child remaps through:
+
+![natural identity with a surrogate primary key](docs/diagrams/mode-surrogate.svg)
+
+![mode: value](docs/diagrams/mode-value.svg)
 
 The two are byte-identical in the engine — nothing reads `mode == "natural"` or `mode == "value"`.
 `value` exists as a **reviewer signal**: it records that the identity is only meaningful relative to
@@ -243,6 +256,8 @@ that reason; do not expect a behavioural difference.
 #### hash
 
 For wide value rows with no usable natural key. Identity *is* the content.
+
+![mode: hash](docs/diagrams/mode-hash.svg)
 
 - **Hashed columns** = insertable columns − `audit_exclude` − `hash_exclude` − the surrogate, if any
   (`plan.py`).
@@ -266,6 +281,8 @@ For wide value rows with no usable natural key. Identity *is* the content.
   `value`) and `delete_orphans`.
 
 #### out_of_scope
+
+![mode: out_of_scope](docs/diagrams/mode-out-of-scope.svg)
 
 The table is dropped from the load order and never read or written. The consequence to watch: an
 **in-scope child's FK to an out-of-scope parent is not remapped** — the source (production) surrogate
@@ -304,6 +321,8 @@ marking a table out of scope, check who references it.
    owned child in scope — that is exactly aggregate-root ownership. With two or more it silently
    weakens to "all endpoints came from Source"; see the schema assumptions in
    [General strategy](#general-strategy).
+
+![delete_orphans: the source child set wins inside a matched parent](docs/diagrams/delete-orphans.svg)
 
 There is no second pass. Every FK is resolvable at the point its table is processed, because the
 load order guarantees the parent is already there — which is exactly what the acyclicity assumption
