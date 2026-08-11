@@ -37,7 +37,7 @@ parent-first in topological order.
 
 - Scope is the in-scope base tables named in the private `INSTANCE.md`. Isolated tables and
   `*_V` views are out of scope. (The public sample uses the Order/OrderLine schema in `examples/`.)
-- Matching modes per table: `natural | value | hash | reload | out_of_scope`.
+- Matching modes per table: `natural | value | hash | out_of_scope`.
 - Strip `SYS_NC%$` hidden columns (function-based-index virtual columns).
 - Do **not** ask the model to parse `catalog.json` (600 KB) — use the deterministic `jq`/`tsort`
   pipeline for all schema facts. The model only authors judgment (identity choices, docs, code).

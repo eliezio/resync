@@ -41,8 +41,13 @@ present in the current source is always preserved.
   and accumulate as stale data over successive re-syncs.
 - The definition of "target-only row" is therefore *heuristic*, not exact — it includes both
   genuinely new target rows and orphaned formerly-production rows.
-- Tables that are Source-owned and must mirror production exactly (including deletes) should use
-  `reload` mode (`TRUNCATE` + reload) instead of merge, accepting that they hold no target-only
-  rows.
-- If stale accumulation later proves unacceptable, revisit by introducing a baseline manifest;
-  this is a reversible-at-cost decision, hence recorded here.
+- **No per-table escape hatch for deletes.** A `reload` mode (`TRUNCATE` + reload) was implemented
+  for Source-owned tables that must mirror production exactly, then removed on 2026-08-11: no table
+  in the configured scope needed it, and `TRUNCATE` is DDL, which cost an implicit `COMMIT`, a
+  dependency on `constraint_handling: disable`, and three unguarded interactions (surrogate tables,
+  `delete_orphans`, deferred FK columns). Paying that for an unused mode was the wrong trade.
+- If a Source-owned table later does need deletes to propagate, the cheap route is an unscoped
+  variant of the existing `delete_orphans` DELETE — target rows whose identity is absent from
+  source, removed inside the transaction — not a return to `TRUNCATE`. The expensive route, if
+  stale accumulation proves unacceptable across the board, is the baseline manifest rejected above.
+  Both are reversible-at-cost, hence recorded here.

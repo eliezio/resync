@@ -256,6 +256,21 @@ def test_hash_mode_rejects_surrogate():
         pass
 
 
+def test_unknown_mode_rejected():
+    """A config naming a mode the engine no longer has (e.g. the removed `reload`) must fail loud,
+    not fall through to the default merge — the behaviour difference is a data-loss difference."""
+    import tempfile
+    import pytest
+    src = open(CONFIG).read().replace("mode: natural\n    identity: [ORDER_NO]",
+                                      "mode: reload\n    identity: [ORDER_NO]")
+    assert "mode: reload" in src
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write(src)
+    with pytest.raises(ValueError, match="unknown mode"):
+        Config.from_yaml(fh.name)
+    os.unlink(fh.name)
+
+
 def test_seed_config_classifies_sample():
     import yaml
     from resync_engine import seed

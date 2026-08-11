@@ -94,8 +94,11 @@ constraint-enforced. Central artifact of the re-sync. Each table takes one **mat
 - **value** — match on a column subset that includes a parent reference (Value Object).
 - **hash** — match on `STANDARD_HASH` over a canonicalised, audit-excluded column set;
   encoding of Value-Object identity for wide tuples. Scoped to effectively-immutable rows.
-- **reload** — `TRUNCATE` + reload verbatim; for Source-owned tables with no Target-only rows.
 - **out_of_scope** — left untouched on the Target.
+
+There is deliberately no whole-table mirror mode: every mode preserves Target-only rows, and the
+only deletion the engine performs is the parent-scoped `delete_orphans` DELETE. A `reload`
+(`TRUNCATE` + reload) mode existed and was removed — see ADR-0001.
 
 ### Version ID
 

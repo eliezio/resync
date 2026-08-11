@@ -75,9 +75,12 @@ class Schema:
         return cls(tables=tables)
 
 
+MODES = ("natural", "value", "hash", "out_of_scope")
+
+
 @dataclass
 class TableConfig:
-    mode: str                       # natural | value | hash | reload | out_of_scope
+    mode: str                       # one of MODES
     identity: list[str] = field(default_factory=list)
     hash_exclude: list[str] = field(default_factory=list)
     sequence: str | None = None     # target sequence for surrogate allocation
@@ -100,6 +103,12 @@ class Config:
         import yaml  # lazy; only needed when a config is loaded
         with open(path) as fh:
             doc = yaml.safe_load(fh)
+        bad = {n: s.get("mode") for n, s in doc["tables"].items() if s.get("mode") not in MODES}
+        if bad:
+            raise ValueError(
+                f"unknown mode(s) in {path}: {bad}. Valid modes: {' | '.join(MODES)}. "
+                "(`reload` was removed — a source-owned table that must mirror deletes needs a "
+                "delete policy, not a TRUNCATE; see ADR-0001.)")
         tables = {
             name: TableConfig(
                 mode=spec["mode"],

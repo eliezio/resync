@@ -64,8 +64,6 @@ def _counts(cur, p: TablePlan, stg: str, tgt: str) -> Counts:
         to_ins = _scalar(cur, f"SELECT COUNT(*) FROM {im} WHERE IS_NEW = 1")
         total = _scalar(cur, f"SELECT COUNT(*) FROM {tgt}.{p.name}")
         return Counts(matched, to_ins, total - matched)
-    if p.mode == "reload":
-        return Counts(0, _scalar(cur, f"SELECT COUNT(*) FROM {stg}.{p.name}"), 0)
     cur.execute(sqlgen.dryrun_counts(p, stg, tgt))
     m, i, t = cur.fetchone()
     return Counts(int(m), int(i), int(t))

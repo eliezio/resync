@@ -3,8 +3,8 @@
 Two shapes:
   * Natural / value tables (no surrogate) — a single MERGE keyed on natural identity: update
     matched, insert unmatched, leave target-only rows untouched.
-  * Surrogate tables — four steps, because children reference the surrogate and need the
-    source->target mapping exposed in an id-map:
+  * Surrogate tables — four steps after the id-map is created, because children reference the
+    surrogate and need the source->target mapping exposed in an id-map:
       1. match     : record src->tgt for rows found by natural identity (is_new=0)
       2. allocate  : mint fresh target keys for unmatched source rows (is_new=1)
       3. insert    : insert the new rows using the allocated keys
@@ -229,16 +229,6 @@ WHEN MATCHED THEN UPDATE SET
        {set_s}"""
 
 
-def reload_table(p: TablePlan, stg: str, tgt: str) -> list[str]:
-    joins = "\n    ".join(_remap_joins(p, stg))
-    select = ",\n       ".join(f"{_write_expr(p, c)} AS {c}" for c in p.columns)
-    cols = ", ".join(p.columns)
-    return [
-        f"TRUNCATE TABLE {tgt}.{p.name}",
-        f"INSERT INTO {tgt}.{p.name} ({cols})\nSELECT {select}\nFROM {stg}.{p.name} s\n    {joins}",
-    ]
-
-
 def merge_hash(p: TablePlan, stg: str, tgt: str) -> str:
     """MERGE keyed on a content hash, for wide value rows. Scoped to tables without a surrogate
     and without delete_orphans."""
@@ -273,7 +263,7 @@ def build_idmap(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> lis
     """Statements that create and populate a surrogate table's id-map (match + allocate). Empty
     for tables without a surrogate. Run before counts and writes; `with_keys=False` marks
     unmatched rows without allocating real keys (dry-run)."""
-    if p.mode == "reload" or not p.needs_idmap:
+    if not p.needs_idmap:
         return []
     return [create_idmap(p, stg), match_surrogate(p, stg, tgt),
             allocate_surrogate(p, stg, tgt, with_keys)]
@@ -281,9 +271,7 @@ def build_idmap(p: TablePlan, stg: str, tgt: str, with_keys: bool = True) -> lis
 
 def write_statements(p: TablePlan, stg: str, tgt: str) -> list[str]:
     """Statements that mutate the target: assume any id-maps are already built."""
-    if p.mode == "reload":
-        stmts = reload_table(p, stg, tgt)
-    elif p.mode == "hash":
+    if p.mode == "hash":
         stmts = [merge_hash(p, stg, tgt)]
     elif p.needs_idmap:
         stmts = [insert_surrogate(p, stg, tgt), update_surrogate(p, stg, tgt)]
